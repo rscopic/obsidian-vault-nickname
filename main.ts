@@ -25,6 +25,11 @@ const DEFAULT_SETTINGS: VaultNicknamePluginSettings = {
     nickname: "My Vault Nickname",
 }
 
+const PATH_SEPARATOR: string = function () {
+    const platform = window.navigator.platform;
+    return (platform === "Win32" || platform === "Win64") ?  '\\' : '/';
+}();
+
 export default class VaultNicknamePlugin extends Plugin {
     settings: VaultNicknamePluginSettings;
 
@@ -42,6 +47,13 @@ export default class VaultNicknamePlugin extends Plugin {
         this.activeLeafChangeCallback = this.onActiveLeafChange.bind(this);
 
         await this.loadSettings();
+
+        // Ensure the plugin's settings file exists immediatley. This ensures
+        // that the vault chooser drop down menu can be correctly updated to
+        // match the vault's nicknames. (The nickname is read directly from
+        // the settings file which may otherwise only be written when the
+        // plugin's settings are changed or the vault is closed.)
+        await this.saveSettings();
 
         this.addSettingTab(new VaultNicknameSettingTab(this.app, this));
         this.app.workspace.onLayoutReady(this.onLayoutReady.bind(this));
@@ -131,12 +143,6 @@ export default class VaultNicknamePlugin extends Plugin {
             console.error('Failed to retrieve list of known vaults.');
         }
 
-        // Determine the correct path separator used by this system.
-        const platformPathSeparator = function () {
-            const platform = window.navigator.platform;
-            return (platform === "Win32" || platform === "Win64") ?  '\\' : '/';
-        }();
-
         // Pair each vault to its menu item and apply its nickname.
         // This applies the vault's nickname even if the nickname plugin is
         // disabled in that value.
@@ -158,7 +164,7 @@ export default class VaultNicknamePlugin extends Plugin {
                 'plugins',
                 this.manifest.id,
                 'data.json'
-            ].join(platformPathSeparator));
+            ].join(PATH_SEPARATOR));
 
             if (!existsSync(vaultPluginSettingsFilePath)) {
                 //console.log("Plugin settings does not exist: " + vaultPluginSettingsFilePath);
@@ -218,7 +224,26 @@ export default class VaultNicknamePlugin extends Plugin {
     }
 
     async loadSettings() {
-        this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+        // Make a copy of the default settings so the defaults can be
+        // customized per-vault.
+
+        const personalizedDefaultSettings =
+            Object.assign({}, DEFAULT_SETTINGS);
+
+        // Try use the vault's parent folder name as the default nickname.
+        const vaultAbsoluteFilePath = this.app.vault.adapter.getBasePath()
+
+        if (vaultAbsoluteFilePath) {
+            const explodedVaultPath = vaultAbsoluteFilePath.split(PATH_SEPARATOR);
+            const indexToParentFolder = explodedVaultPath.length - 2;
+            if (indexToParentFolder >= 0 && explodedVaultPath[indexToParentFolder] && explodedVaultPath[indexToParentFolder].trim()) {
+                personalizedDefaultSettings.nickname = explodedVaultPath[indexToParentFolder].trim();
+            }
+        }
+
+        // Load user settings or fallback to the personalized default settings.
+        this.settings =
+            Object.assign({}, personalizedDefaultSettings, await this.loadData());
 
         this.refreshSelectedVaultName();
     }
