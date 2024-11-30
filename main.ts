@@ -4,6 +4,7 @@ import {
     PluginSettingTab,
     Setting,
     normalizePath,
+    WorkspaceLeaf,
 } from "obsidian";
 
 // Needed for reading nicknames from other vaults.
@@ -33,18 +34,24 @@ export default class VaultNicknamePlugin extends Plugin {
     ///
     vaultSwitcherCallback: () => Promise<void>;
 
+    activeLeafChangeCallback: (file: WorkspaceLeaf | null) => void;
+
     async onload() {
-        // Create (but don't register) the vault switcher callback.
+        // Create (but don't register) the callbacks (bound to `this`).
         this.vaultSwitcherCallback = this.onVaultSwitcherClicked.bind(this);
+        this.activeLeafChangeCallback = this.onActiveLeafChange.bind(this);
+
         await this.loadSettings();
 
         this.addSettingTab(new VaultNicknameSettingTab(this.app, this));
         this.app.workspace.onLayoutReady(this.onLayoutReady.bind(this));
+        this.app.workspace.on('active-leaf-change', this.activeLeafChangeCallback);
     }
 
     onunload() {
+        this.app.workspace.off('active-leaf-change', this.activeLeafChangeCallback);
         this.useVaultSwitcherCallback(false);
-        this.setSelectedVaultDisplayName(this.app.vault.getName());
+        this.refreshSelectedVaultName();
     }
 
     onLayoutReady() {
@@ -97,6 +104,13 @@ export default class VaultNicknamePlugin extends Plugin {
                 subtree: true
             });
         });
+    }
+
+    /// Invoked when the active workspace leaf was changed. We need to use this
+    /// event to fix up the app window's title.
+    ///
+    onActiveLeafChange(file: WorkspaceLeaf | null) {
+        this.refreshSelectedVaultName();
     }
 
     /// Invoked when the user clicks the workspace's vault switcher drawer.
@@ -176,7 +190,7 @@ export default class VaultNicknamePlugin extends Plugin {
     ///
     refreshSelectedVaultName() {
         const currentVaultName =
-            (this.settings.nickname && this.settings.nickname.trim()) ?
+            (this.settings && this.settings.nickname && this.settings.nickname.trim()) ?
                 this.settings.nickname.trim() :
                 this.app.vault.getName();
 
@@ -184,13 +198,22 @@ export default class VaultNicknamePlugin extends Plugin {
     }
 
     /// Change the display name of the active vault in the workspace's vault
-    /// switcher drawer.
+    /// switcher drawer and the app window's title.
     ///
     setSelectedVaultDisplayName(displayName: string) {
-        const selectedVaultNameElement = window.activeDocument.querySelector('.workspace-drawer-vault-name');
+        const selectedVaultNameElement =
+            window.activeDocument.querySelector('.workspace-drawer-vault-name');
 
         if (selectedVaultNameElement) {
             selectedVaultNameElement.textContent = displayName;
+        }
+
+        const titleSeparator = ' - ';
+        const titleParts = window.activeDocument.title.split(titleSeparator);
+        if (titleParts.length > 2) {
+            titleParts[titleParts.length - 2] = displayName;
+            const title = titleParts.join(titleSeparator);
+            window.activeDocument.title = title;
         }
     }
 
