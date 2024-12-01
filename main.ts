@@ -33,17 +33,29 @@ const PATH_SEPARATOR: string = function () {
 export default class VaultNicknamePlugin extends Plugin {
     settings: VaultNicknamePluginSettings;
 
+    /// The vault switcher element where this plugin visualizes nicknames.
+    /// This element is cached so that some custom callbacks can check whether
+    /// it has a context menu visible: `hasClass('has-active-menu')`
+    ///
+    vaultSwitcherElement: Element | null;
+
     /// The callback invoked whenever the vault switcher is clicked. It is a
     /// bound function and is therefore cached so it can be removed when the
     /// addon is disabled.
     ///
-    vaultSwitcherCallback: () => Promise<void>;
+    vaultSwitcherClickCallback: () => Promise<void>;
+    vaultSwitcherContextMenuCallback: () => Promise<void>;
 
+    /// The callback that is invoked whenever the user clicks on an item in
+    /// Obsidian's file tree. This callback ensures the app title correctly
+    /// updates to show the vault's nickname.
+    ///
     activeLeafChangeCallback: (file: WorkspaceLeaf | null) => void;
 
     async onload() {
         // Create (but don't register) the callbacks (bound to `this`).
-        this.vaultSwitcherCallback = this.onVaultSwitcherClicked.bind(this);
+        this.vaultSwitcherClickCallback = this.onVaultSwitcherClicked.bind(this);
+        this.vaultSwitcherContextMenuCallback = this.onVaultSwitcherContextMenu.bind(this);
         this.activeLeafChangeCallback = this.onActiveLeafChange.bind(this);
 
         await this.loadSettings();
@@ -62,32 +74,35 @@ export default class VaultNicknamePlugin extends Plugin {
 
     onunload() {
         this.app.workspace.off('active-leaf-change', this.activeLeafChangeCallback);
-        this.useVaultSwitcherCallback(false);
+        this.useVaultSwitcherCallbacks(false);
         this.refreshSelectedVaultName();
     }
 
     onLayoutReady() {
-        this.useVaultSwitcherCallback(true);
+        this.vaultSwitcherElement =
+            window.activeDocument.querySelector('.workspace-drawer-vault-switcher');
+
+        this.useVaultSwitcherCallbacks(true);
         this.refreshSelectedVaultName();
     }
 
-    useVaultSwitcherCallback(use: boolean) {
-        const vaultSwitcherElement =
-            window.activeDocument.querySelector('.workspace-drawer-vault-switcher');
-
-        if (!vaultSwitcherElement) {
-            console.error('Vault switcher element not found. Cannot update its click event.');
+    useVaultSwitcherCallbacks(use: boolean) {
+        if (!this.vaultSwitcherElement) {
+            console.error('Vault switcher element not found. Cannot update its events.');
             return;
         }
 
-        // Unsubscribe, even when `use` is true to guard against duplicate
-        // listeners.
-        vaultSwitcherElement.removeEventListener('click', this.vaultSwitcherCallback);
+        // Unsubscribe, even if we want to subscribe. This guards against
+        // duplicate listeners.
+        this.vaultSwitcherElement.removeEventListener('click', this.vaultSwitcherClickCallback);
+        this.vaultSwitcherElement.removeEventListener('contextmenu', this.vaultSwitcherContextMenuCallback);
 
-        // Install the vault switcher callback.
         if (use) {
-            vaultSwitcherElement.addEventListener('click', this.vaultSwitcherCallback);
+            // Install the callbacks.
+            this.vaultSwitcherElement.addEventListener('click', this.vaultSwitcherClickCallback);
+            this.vaultSwitcherElement.addEventListener('contextmenu', this.vaultSwitcherContextMenuCallback);
         }
+
     }
 
     /// Query for a selector. If not found, try observing for
@@ -95,6 +110,7 @@ export default class VaultNicknamePlugin extends Plugin {
     ///
     async waitForSelector(selector: string, timeoutMilliseconds: number) : Promise<Element|null> {
         return new Promise<Element|null>(resolve => {
+            // Check initially if the selector matches.
             if (window.activeDocument.querySelector(selector)) {
                 return resolve(document.querySelector(selector));
             }
@@ -103,6 +119,7 @@ export default class VaultNicknamePlugin extends Plugin {
                 resolve(null);
             }, timeoutMilliseconds);
 
+            // Otherwise, use MutationObserver to track changes in the DOM.
             const observer = new MutationObserver(mutations => {
                 if (document.querySelector(selector)) {
                     clearTimeout(timeout);
@@ -111,7 +128,41 @@ export default class VaultNicknamePlugin extends Plugin {
                 }
             });
 
+            // Observe changes in the subtree of the element's parent
             observer.observe(document.body, {
+                childList: true,
+                subtree: true
+            });
+        });
+    }
+
+    /// Wait for an element to be removed.
+    async waitForElementToBeRemoved(element: Element, timeoutMilliseconds: number) : Promise<void> {
+        return new Promise(resolve => {
+            // Check initially if the parent is null (it could already be
+            // removed).
+            const parent = element.parentNode;
+
+            if (!parent) {
+                resolve();
+                return;
+            }
+
+            const timeout = setTimeout(() => {
+                resolve();
+            }, timeoutMilliseconds);
+
+            // Otherwise, use MutationObserver to track changes in the DOM
+            const observer = new MutationObserver(() => {
+                if (!element.parentNode) {
+                    clearTimeout(timeout);
+                    observer.disconnect();
+                    resolve();
+                }
+            });
+
+            // Observe changes in the subtree of the element's parent
+            observer.observe(parent, {
                 childList: true,
                 subtree: true
             });
@@ -188,6 +239,127 @@ export default class VaultNicknamePlugin extends Plugin {
 
             titleElement.textContent = vaultPluginSettings.nickname;
         }
+    }
+
+    /// Invoked when the user context-clicks on the vault switcher drop down.
+    /// This function adds a custom "Set nickname" item to the spawned menu to
+    /// act as a shortcut for quickly nicknaming the vault.
+    ///
+    async onVaultSwitcherContextMenu() {
+        // Ensure we find the newest menu to append our "Set nickname" item.
+        if (this.vaultSwitcherElement && this.vaultSwitcherElement.hasClass('has-active-menu')) {
+
+            // Obsidian says that a menu already exists. We will wait for that
+            // one to be destroyed before we look for the new one.
+
+            const alreadyOpenMenu = window.activeDocument.querySelector('.menu');
+
+            if (alreadyOpenMenu) {
+                await this.waitForElementToBeRemoved(alreadyOpenMenu, 200);
+            }
+        }
+
+        // Look for the new context menu.
+
+        const vaultSwitcherMenu = await this.waitForSelector('.menu', 200);
+
+        if (!vaultSwitcherMenu) {
+            console.error('The vault switcher menu was not found after the timeout.');
+            return;
+        }
+
+        const templateMenuItem = vaultSwitcherMenu.querySelector('.menu-item');
+        if (!templateMenuItem) {
+            console.error('No menu-item to clone');
+            return;
+        }
+
+        const openSettingsMenuItem = templateMenuItem.cloneNode(true);
+        if (!openSettingsMenuItem) {
+            console.error('Failed to clone menu-item');
+            return;
+        }
+
+        const openSettingsMenuItemIcon =
+            openSettingsMenuItem.querySelector('.menu-item-icon');
+
+        if (openSettingsMenuItemIcon) {
+            // Hide the icon.
+            openSettingsMenuItemIcon.toggleVisibility(false);
+        }
+
+        const openSettingsMenuItemLabel =
+            openSettingsMenuItem.querySelector('.menu-item-title');
+
+        if (!openSettingsMenuItemLabel) {
+            console.error('No menu-item-title in cloned menu-item');
+            return;
+        }
+
+        openSettingsMenuItemLabel.textContent = 'Set nickname';
+
+        openSettingsMenuItem.addEventListener('click', this.openVaultNicknameSettings.bind(this));
+
+        /// Deselect other items in this menu and then select (highlight) the
+        /// "Set nickname" item. This is necessary to make the new menu item
+        /// respond to hover events as expected.
+        ///
+        const onMouseOver = function () {
+            const parent = this.parentElement;
+
+            const menuItems = parent.querySelectorAll('.menu-item');
+            for (const menuItem of menuItems) {
+                menuItem.removeClass('selected');
+            }
+
+            this.addClass('selected');
+        }
+
+        /// Deselect the "Set nickname" menu item.
+        ///
+        const onMouseLeave = function () {
+            this.removeClass('selected');
+        }
+
+        openSettingsMenuItem.addEventListener('mouseover', onMouseOver.bind(openSettingsMenuItem));
+        openSettingsMenuItem.addEventListener('mouseleave', onMouseLeave.bind(openSettingsMenuItem));
+
+        vaultSwitcherMenu.appendChild(openSettingsMenuItem);
+    }
+
+    async openVaultNicknameSettings() {
+        // Request the settings window to open.
+        this.app.commands.executeCommandById('app:open-settings');
+
+        // Wait for the settings window to open.
+        const settingsMenu = await this.waitForSelector('.mod-settings', 200);
+        if (!settingsMenu) {
+            console.error('The vault settings menu was not found after the timeout.');
+            return;
+        }
+
+        // Wait for any tab item to appear. Then we know it's go-time to find
+        // the settings tab item for our plugin.
+        const anyTab = await this.waitForSelector('.vertical-tab-nav-item', 200);
+        if (!anyTab) {
+            console.error('Found no tab.');
+            return;
+        }
+
+        // Find the tab that corresponds to this plugin.
+        const settingsTabs = settingsMenu.querySelectorAll('.vertical-tab-nav-item');
+
+        for (const tab of settingsTabs) {
+            if (tab.textContent !== this.manifest.name) {
+                continue;
+            }
+
+            // Open the plugin's settings page.
+            tab.click();
+            return;
+        }
+
+        console.error('Plugin tab not found.');
     }
 
     /// Refresh the text for the active vault in the workspace's vault switcher
