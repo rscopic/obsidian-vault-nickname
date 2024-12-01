@@ -192,25 +192,35 @@ export default class VaultNicknamePlugin extends Plugin {
         }
 
         // Ask Obsidian for its list of known vaults.
-        const vaultList = electron.ipcRenderer.sendSync("vault-list");
-        if (!vaultList) {
+        const vaults = electron.ipcRenderer.sendSync("vault-list");
+        if (!vaults) {
             console.error('Failed to retrieve list of known vaults.');
         }
 
         // Pair each vault to its menu item and apply its nickname.
         // This applies the vault's nickname even if the nickname plugin is
         // disabled in that value.
-        const vaults = Object.values(vaultList);
+        const vaultKeys = Object.keys(vaults);
         const menuItems = vaultSwitcherMenu.querySelectorAll('.menu-item');
-        const min = Math.min(menuItems.length, vaults.length);
+        const min = Math.min(menuItems.length, vaultKeys.length);
         for (let i = 0; i < min; ++i) {
-            const vault = vaults[i];
+            const vaultKey = vaultKeys[i];
+            const vault = vaults[vaultKey];
 
             const titleElement = menuItems[i].querySelector('.menu-item-title');
             if (!titleElement) {
                 console.error('No title element for this vault: ' + vault.path);
                 continue;
             }
+
+            // We could use the following undocumented function kindly shared
+            // by @mnaoumov (https://forum.obsidian.md/t/sharing-plugin-data-between-vaults-stumped-by-override-config-folder/92570/2),
+            // to learn a vault's config folder. However, we would still need
+            // a fallback '.obsidian' literal to handle the default case of a
+            // vault using the normal config folder because in those cases the
+            // function returns `null`. Having a string literal for the default
+            // config folder causes trouble with ObsidianReviewBot on github.
+            //const vaultConfigFolderName = App.getOverrideConfigDir(vaultKey);
 
             const vaultPluginSettingsFilePath = normalizePath([
                 vault.path,
