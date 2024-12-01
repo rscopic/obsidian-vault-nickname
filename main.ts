@@ -81,11 +81,10 @@ export default class VaultNicknamePlugin extends Plugin {
 
         this.addSettingTab(new VaultNicknameSettingTab(this.app, this));
         this.app.workspace.onLayoutReady(this.onLayoutReady.bind(this));
-        this.app.workspace.on('active-leaf-change', this.activeLeafChangeCallback);
+        this.registerEvent(this.app.workspace.on('active-leaf-change', this.activeLeafChangeCallback));
     }
 
     onunload() {
-        this.app.workspace.off('active-leaf-change', this.activeLeafChangeCallback);
         this.useVaultSwitcherCallbacks(false);
         this.refreshSelectedVaultName();
     }
