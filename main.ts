@@ -395,13 +395,7 @@ export default class VaultNicknamePlugin extends Plugin {
         }
     }
 
-    async loadSettings() {
-        // Make a copy of the default settings so the defaults can be
-        // customized per-vault.
-
-        const personalizedDefaultSettings =
-            Object.assign({}, DEFAULT_SETTINGS);
-
+    getVaultParentFolderName() : string {
         // Try use the vault's parent folder name as the default nickname.
         const vaultAbsoluteFilePath = this.app.vault.adapter.getBasePath()
 
@@ -409,8 +403,23 @@ export default class VaultNicknamePlugin extends Plugin {
             const explodedVaultPath = vaultAbsoluteFilePath.split(PATH_SEPARATOR);
             const indexToParentFolder = explodedVaultPath.length - 2;
             if (indexToParentFolder >= 0 && explodedVaultPath[indexToParentFolder] && explodedVaultPath[indexToParentFolder].trim()) {
-                personalizedDefaultSettings.nickname = explodedVaultPath[indexToParentFolder].trim();
+                return explodedVaultPath[indexToParentFolder].trim();
             }
+        }
+
+        return "";
+    }
+
+    async loadSettings() {
+        // Make a copy of the default settings so the defaults can be
+        // customized per-vault.
+
+        const personalizedDefaultSettings =
+            Object.assign({}, DEFAULT_SETTINGS);
+
+        const parentFolderName = this.getVaultParentFolderName();
+        if (parentFolderName) {
+            personalizedDefaultSettings.nickname = parentFolderName;
         }
 
         // Load user settings or fallback to the personalized default settings.
@@ -451,6 +460,22 @@ class VaultNicknameSettingTab extends PluginSettingTab {
                     .setValue(this.plugin.settings.nickname)
                     .onChange(async newValue => {
                         this.plugin.settings.nickname = newValue;
+                        await this.plugin.saveSettings();
+                    })
+            })
+            .addButton(buttonComponent => {
+                buttonComponent
+                    .setIcon('folder-up')
+                    .setTooltip('Use the name of the vault\'s parents folder.')
+                    .onClick(async mouseEvent => {
+                        const parentFolderName = this.plugin.getVaultParentFolderName();
+                        if (!parentFolderName) {
+                            return;
+                        }
+
+                        this.plugin.settings.nickname = parentFolderName;
+                        this.display();
+
                         await this.plugin.saveSettings();
                     })
             });
