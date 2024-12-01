@@ -63,12 +63,15 @@ export default class VaultNicknamePlugin extends Plugin {
 
         await this.loadSettings();
 
-        // Ensure the plugin's settings file exists immediatley. This ensures
-        // that the vault chooser drop down menu can be correctly updated to
-        // match the vault's nicknames. (The nickname is read directly from
-        // the settings file which may otherwise only be written when the
-        // plugin's settings are changed or the vault is closed.)
-        await this.saveSettings();
+        const settingsFilePath = await this.getSettingsFilePath();
+
+        if (!existsSync(settingsFilePath)) {
+            // Ensure the plugin's settings file exists as soon as possible.
+            // This is necessary to ensure the vault switcher drop down menu
+            // updates correctly for within this vault and other vaults that
+            // have the plugin installed.
+            await this.saveSettings();
+        }
 
         this.addSettingTab(new VaultNicknameSettingTab(this.app, this));
         this.app.workspace.onLayoutReady(this.onLayoutReady.bind(this));
