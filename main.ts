@@ -1,13 +1,16 @@
 import {
     App,
+    Platform,
     Plugin,
     PluginSettingTab,
     Setting,
-    normalizePath,
     WorkspaceLeaf,
+    normalizePath,
 } from "obsidian";
 
-// Needed for reading nicknames from other vaults.
+// Needed for reading nicknames from a hidden file in this and other vaults.
+// Obsidian doesn't offer an API to access hidden files nor files from other
+// vaults.
 import {
     existsSync,
     readFileSync,
@@ -26,11 +29,14 @@ const DEFAULT_SETTINGS: VaultNicknamePluginSettings = {
     nickname: "My Vault Nickname",
 }
 
-const PATH_SEPARATOR: string = function () {
-    const platform = window.navigator.platform;
-    return (platform === "Win32" || platform === "Win64") ?  '\\' : '/';
-}();
+const PATH_SEPARATOR: string = Platform.isWin ? '\\' : '/';
 
+/// A path local to any vault's root that points at this plugins settings file.
+/// Unfortunately, we cannot use the standard "data.json" that lives in the
+/// plugins install folder directly because we cannot reliably know this path
+/// from outside vaults. (The use can override a vault's config folder and the
+/// plugin's folder name may be arbitrarily changed if installed manually.)
+///
 const VAULT_LOCAL_SETTINGS_FILE_PATH: string = ".vault-nickname";
 
 export default class VaultNicknamePlugin extends Plugin {
@@ -408,21 +414,6 @@ export default class VaultNicknamePlugin extends Plugin {
         }
     }
 
-    getVaultParentFolderName() : string {
-        // Try use the vault's parent folder name as the default nickname.
-        const vaultAbsoluteFilePath = this.app.vault.adapter.getBasePath()
-
-        if (vaultAbsoluteFilePath) {
-            const explodedVaultPath = vaultAbsoluteFilePath.split(PATH_SEPARATOR);
-            const indexToParentFolder = explodedVaultPath.length - 2;
-            if (indexToParentFolder >= 0 && explodedVaultPath[indexToParentFolder] && explodedVaultPath[indexToParentFolder].trim()) {
-                return explodedVaultPath[indexToParentFolder].trim();
-            }
-        }
-
-        return "";
-    }
-
     async loadSettings() {
         // Setup a fallback nickname that is the name of the vault's parent
         // folder.
@@ -470,13 +461,26 @@ export default class VaultNicknamePlugin extends Plugin {
         this.refreshSelectedVaultName();
     }
 
+    getVaultParentFolderName() : string {
+        // Try use the vault's parent folder name as the default nickname.
+        const vaultAbsoluteFilePath = this.app.vault.adapter.getBasePath()
+
+        if (vaultAbsoluteFilePath) {
+            const explodedVaultPath = vaultAbsoluteFilePath.split(PATH_SEPARATOR);
+            const indexToParentFolder = explodedVaultPath.length - 2;
+            if (indexToParentFolder >= 0 && explodedVaultPath[indexToParentFolder] && explodedVaultPath[indexToParentFolder].trim()) {
+                return explodedVaultPath[indexToParentFolder].trim();
+            }
+        }
+
+        return "";
+    }
+
     async getSettingsFilePath(): Promise<string> {
-        const settingsFilePath = [
+        return [
             this.app.vault.adapter.getBasePath(),
             VAULT_LOCAL_SETTINGS_FILE_PATH
         ].join(PATH_SEPARATOR);
-
-        return settingsFilePath;
     }
 }
 
@@ -499,6 +503,7 @@ class VaultNicknameSettingTab extends PluginSettingTab {
             .setDesc('Override the vault\'s display name.')
             .setTooltip("A vault nickname controls the text shown in the workspace's vault switcher. The 'Manage Vaults' window will continue showing the true vault name as these may be disambiguated by their visible path.")
             .addText((textComponent) => {
+                // A text field to assign the vault's nickname.
                 textComponent
                     .setPlaceholder('No nickname')
                     .setValue(this.plugin.settings.nickname)
@@ -508,6 +513,9 @@ class VaultNicknameSettingTab extends PluginSettingTab {
                     })
             })
             .addButton(buttonComponent => {
+                // A button to quickly apply the vault's parent folder name as
+                // the nickname (a common use case and how the default nickname
+                // is chosen).
                 buttonComponent
                     .setIcon('folder-up')
                     .setTooltip('Use the name of the vault\'s parents folder.')
@@ -518,6 +526,8 @@ class VaultNicknameSettingTab extends PluginSettingTab {
                         }
 
                         this.plugin.settings.nickname = parentFolderName;
+
+                        // Refresh the nickname field in the settings window.
                         this.display();
 
                         await this.plugin.saveSettings();
