@@ -40,6 +40,14 @@ const PATH_SEPARATOR: string = Platform.isWin ? '\\' : '/';
 const VAULT_LOCAL_SETTINGS_FILE_PATH: string = ".vault-nickname";
 
 export default class VaultNicknamePlugin extends Plugin {
+
+    /// Whether the plugin is enabled. It is necessary to track this manually
+    /// because `this.app.plugins.enabledPlugins` does not correctly identify
+    /// the plugin as being enabled during `onload`. The plugin uses this state
+    /// to know whether to apply its UI changes or restore their default state.
+    ///
+    isEnabled = false;
+
     settings: VaultNicknamePluginSettings;
 
     /// The vault switcher element where this plugin visualizes nicknames.
@@ -62,6 +70,8 @@ export default class VaultNicknamePlugin extends Plugin {
     activeLeafChangeCallback: (file: WorkspaceLeaf | null) => void;
 
     async onload() {
+        this.isEnabled = true;
+
         // Create (but don't register) the callbacks (bound to `this`).
         this.vaultSwitcherClickCallback = this.onVaultSwitcherClicked.bind(this);
         this.vaultSwitcherContextMenuCallback = this.onVaultSwitcherContextMenu.bind(this);
@@ -85,6 +95,8 @@ export default class VaultNicknamePlugin extends Plugin {
     }
 
     onunload() {
+        this.isEnabled = false;
+
         this.useVaultSwitcherCallbacks(false);
         this.refreshSelectedVaultName();
     }
@@ -360,7 +372,7 @@ export default class VaultNicknamePlugin extends Plugin {
         // the settings tab item for our plugin.
         const anyTab = await this.waitForSelector('.vertical-tab-nav-item', 200);
         if (!anyTab) {
-            console.error('Found no tab.');
+            console.error('Timeout while waiting for settings menu to open.');
             return;
         }
 
@@ -386,7 +398,7 @@ export default class VaultNicknamePlugin extends Plugin {
     ///
     refreshSelectedVaultName() {
         const currentVaultName =
-            (this.settings && this.settings.nickname && this.settings.nickname.trim()) ?
+            (this.isEnabled && this.settings && this.settings.nickname && this.settings.nickname.trim()) ?
                 this.settings.nickname.trim() :
                 this.app.vault.getName();
 
