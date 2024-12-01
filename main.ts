@@ -34,7 +34,7 @@ const PATH_SEPARATOR: string = Platform.isWin ? '\\' : '/';
 /// A path local to any vault's root that points at this plugins settings file.
 /// Unfortunately, we cannot use the standard "data.json" that lives in the
 /// plugins install folder directly because we cannot reliably know this path
-/// from outside vaults. (The use can override a vault's config folder and the
+/// from outside vaults. (The user can override a vault's config folder and the
 /// plugin's folder name may be arbitrarily changed if installed manually.)
 ///
 const VAULT_LOCAL_SETTINGS_FILE_PATH: string = ".vault-nickname";
@@ -83,9 +83,9 @@ export default class VaultNicknamePlugin extends Plugin {
 
         if (!existsSync(settingsFilePath)) {
             // Ensure the plugin's settings file exists as soon as possible.
-            // This is necessary to ensure the vault switcher drop down menu
-            // updates correctly for within this vault and other vaults that
-            // have the plugin installed.
+            // This is necessary to because the plugin reads this file for
+            // this vault and other vault's nickname when updating the vault
+            // switcher drop down menu items.
             await this.saveSettings();
         }
 
@@ -98,7 +98,7 @@ export default class VaultNicknamePlugin extends Plugin {
         this.isEnabled = false;
 
         this.useVaultSwitcherCallbacks(false);
-        this.refreshSelectedVaultName();
+        this.refreshVaultDisplayName();
     }
 
     onLayoutReady() {
@@ -106,7 +106,7 @@ export default class VaultNicknamePlugin extends Plugin {
             window.activeDocument.querySelector('.workspace-drawer-vault-switcher');
 
         this.useVaultSwitcherCallbacks(true);
-        this.refreshSelectedVaultName();
+        this.refreshVaultDisplayName();
     }
 
     useVaultSwitcherCallbacks(use: boolean) {
@@ -196,7 +196,7 @@ export default class VaultNicknamePlugin extends Plugin {
     /// event to fix up the app window's title.
     ///
     onActiveLeafChange(file: WorkspaceLeaf | null) {
-        this.refreshSelectedVaultName();
+        this.refreshVaultDisplayName();
     }
 
     /// Invoked when the user clicks the workspace's vault switcher drawer.
@@ -248,7 +248,7 @@ export default class VaultNicknamePlugin extends Plugin {
             ].join(PATH_SEPARATOR));
 
             if (!existsSync(vaultPluginSettingsFilePath)) {
-                //console.log("Plugin settings does not exist: " + vaultPluginSettingsFilePath);
+                //console.log("No nickname settings for vault: " + vaultPluginSettingsFilePath);
                 continue;
             }
 
@@ -277,6 +277,8 @@ export default class VaultNicknamePlugin extends Plugin {
     ///
     async onVaultSwitcherContextMenu() {
         // Ensure we find the newest menu to append our "Set nickname" item.
+        // (When the user context-clicks twice, the first menu will momentarily
+        // still exist.)
         if (this.vaultSwitcherElement && this.vaultSwitcherElement.hasClass('has-active-menu')) {
 
             // Obsidian says that a menu already exists. We will wait for that
@@ -298,6 +300,9 @@ export default class VaultNicknamePlugin extends Plugin {
             return;
         }
 
+        // Find the "Show in explorer" item and clone it for our "Set nickname"
+        // menu item.
+
         const templateMenuItem = vaultSwitcherMenu.querySelector('.menu-item');
         if (!templateMenuItem) {
             console.error('No menu-item to clone');
@@ -310,11 +315,15 @@ export default class VaultNicknamePlugin extends Plugin {
             return;
         }
 
+        // Setup our "Set nickname" menu item's text and callbacks. We must
+        // manually implement 'mouseover' and 'mouseleave' to maintain the
+        // same visual feedback quality as the original item.
+
         const openSettingsMenuItemIcon =
             openSettingsMenuItem.querySelector('.menu-item-icon');
 
         if (openSettingsMenuItemIcon) {
-            // Hide the icon.
+            // Hide the icon. (Not so simple to set a custom icon from here.)
             openSettingsMenuItemIcon.toggleVisibility(false);
         }
 
@@ -330,7 +339,8 @@ export default class VaultNicknamePlugin extends Plugin {
 
         openSettingsMenuItem.addEventListener('click', this.openVaultNicknameSettings.bind(this));
 
-        /// Deselect other items in this menu and then select (highlight) the
+        /// Manually animate the item during mouseover:
+        /// Deselect other items in this menu and then select(highlight) the
         /// "Set nickname" item. This is necessary to make the new menu item
         /// respond to hover events as expected.
         ///
@@ -345,6 +355,7 @@ export default class VaultNicknamePlugin extends Plugin {
             this.addClass('selected');
         }
 
+        /// Manually animate the item during mouseleave:
         /// Deselect the "Set nickname" menu item.
         ///
         const onMouseLeave = function () {
@@ -357,6 +368,10 @@ export default class VaultNicknamePlugin extends Plugin {
         vaultSwitcherMenu.appendChild(openSettingsMenuItem);
     }
 
+    /// Invoked from the vault switcher context menu (Set nickname). This opens
+    /// the vault's settings and activates the Vault Nickname settings tab for
+    /// quick access to renaming the vault.
+    ///
     async openVaultNicknameSettings() {
         // Request the settings window to open.
         this.app.commands.executeCommandById('app:open-settings');
@@ -372,7 +387,7 @@ export default class VaultNicknamePlugin extends Plugin {
         // the settings tab item for our plugin.
         const anyTab = await this.waitForSelector('.vertical-tab-nav-item', 200);
         if (!anyTab) {
-            console.error('Timeout while waiting for settings menu to open.');
+            console.error('Timeout while waiting for a settings menu tab to be found.');
             return;
         }
 
@@ -396,19 +411,19 @@ export default class VaultNicknamePlugin extends Plugin {
     /// drawer. If no nickname exists for the active vault, the label will
     /// fallback to the vault's folder name.
     ///
-    refreshSelectedVaultName() {
+    refreshVaultDisplayName() {
         const currentVaultName =
             (this.isEnabled && this.settings && this.settings.nickname && this.settings.nickname.trim()) ?
                 this.settings.nickname.trim() :
                 this.app.vault.getName();
 
-        this.setSelectedVaultDisplayName(currentVaultName);
+        this.setVaultDisplayName(currentVaultName);
     }
 
     /// Change the display name of the active vault in the workspace's vault
     /// switcher drawer and the app window's title.
     ///
-    setSelectedVaultDisplayName(displayName: string) {
+    setVaultDisplayName(displayName: string) {
         const selectedVaultNameElement =
             window.activeDocument.querySelector('.workspace-drawer-vault-name');
 
@@ -425,9 +440,15 @@ export default class VaultNicknamePlugin extends Plugin {
         }
     }
 
+    /// Load the vault's nickname. Currently, a hidden file in the root of the
+    /// vault is used because it simplifies sharing vault nicknames between
+    /// other instances of the plugin.
+    ///
     async loadSettings() {
-        // Setup a fallback nickname that is the name of the vault's parent
-        // folder.
+        // Overwrite DEFAULT_SETTINGS with a default nickname that is
+        // personalized to this vault's file path. We will use the name of the
+        // vault's parent folder as the default nickname.
+
         const personalizedDefaultSettings =
             Object.assign({}, DEFAULT_SETTINGS);
 
@@ -436,7 +457,9 @@ export default class VaultNicknamePlugin extends Plugin {
             personalizedDefaultSettings.nickname = parentFolderName;
         }
 
-        // Try to load the saved vault nickname.
+        // Setup an object to receive the nickname as read from the hidden
+        // nickname file in the vault's root.
+
         let loadedSettings = {};
 
         const settingsFilePath = await this.getSettingsFilePath();
@@ -455,9 +478,13 @@ export default class VaultNicknamePlugin extends Plugin {
         this.settings =
             Object.assign({}, personalizedDefaultSettings, loadedSettings);
 
-        this.refreshSelectedVaultName();
+        this.refreshVaultDisplayName();
     }
 
+    /// Write the vault's nickname to disk. Currently, a hidden file in the
+    /// root of the vault is used because it simplifies sharing vault nicknames
+    /// between other instances of the plugin.
+    ///
     async saveSettings() {
         const settingsFilePath = await this.getSettingsFilePath();
 
@@ -469,25 +496,38 @@ export default class VaultNicknamePlugin extends Plugin {
             writeFileSync(settingsFilePath, settingsJson);
         }
 
-        this.refreshSelectedVaultName();
+        this.refreshVaultDisplayName();
     }
 
-    getVaultParentFolderName() : string {
-        // Try use the vault's parent folder name as the default nickname.
+    /// Get the name of the vault's parent folder. This is used as the plugin's
+    /// default vault nickname
+    ///
+    getVaultParentFolderName(): string {
+        // Get the absolute path to the vault's root.
         const vaultAbsoluteFilePath = this.app.vault.adapter.getBasePath()
 
-        if (vaultAbsoluteFilePath) {
-            const explodedVaultPath = vaultAbsoluteFilePath.split(PATH_SEPARATOR);
-            const indexToParentFolder = explodedVaultPath.length - 2;
-            if (indexToParentFolder >= 0 && explodedVaultPath[indexToParentFolder] && explodedVaultPath[indexToParentFolder].trim()) {
-                return explodedVaultPath[indexToParentFolder].trim();
-            }
+        if (!vaultAbsoluteFilePath) {
+            return "";
         }
 
-        return "";
+        // Explode the vault path into each of its folders.
+        const explodedVaultPath = vaultAbsoluteFilePath.split(PATH_SEPARATOR);
+        const indexOfParentFolder = explodedVaultPath.length - 2;
+        if (indexOfParentFolder < 0 || !explodedVaultPath[indexOfParentFolder] || !explodedVaultPath[indexOfParentFolder].trim()) {
+            return "";
+        }
+
+        return explodedVaultPath[indexOfParentFolder].trim();
     }
 
-    async getSettingsFilePath(): Promise<string> {
+    /// Get the absolute path to this vault's nickname settings. This is a
+    /// hidden file in the root of the vault. Ideally, we would have this file
+    /// in the plugin's install folder but it is currently tricky to access
+    /// files in other vaults' config folder.
+    ///
+    getSettingsFilePath(): string {
+        // Ideally we would use a Vault API to get the TFile of the settings
+        // file. However, that API does not support hidden files.
         return [
             this.app.vault.adapter.getBasePath(),
             VAULT_LOCAL_SETTINGS_FILE_PATH
