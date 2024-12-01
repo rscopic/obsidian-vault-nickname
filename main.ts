@@ -11,6 +11,7 @@ import {
 import {
     existsSync,
     readFileSync,
+    writeFileSync,
 } from "fs";
 
 interface VaultNicknamePluginSettings {
@@ -29,6 +30,8 @@ const PATH_SEPARATOR: string = function () {
     const platform = window.navigator.platform;
     return (platform === "Win32" || platform === "Win64") ?  '\\' : '/';
 }();
+
+const VAULT_LOCAL_SETTINGS_FILE_PATH: string = ".vault-nickname";
 
 export default class VaultNicknamePlugin extends Plugin {
     settings: VaultNicknamePluginSettings;
@@ -211,10 +214,7 @@ export default class VaultNicknamePlugin extends Plugin {
 
             const vaultPluginSettingsFilePath = normalizePath([
                 vault.path,
-                '.obsidian',
-                'plugins',
-                this.manifest.id,
-                'data.json'
+                VAULT_LOCAL_SETTINGS_FILE_PATH
             ].join(PATH_SEPARATOR));
 
             if (!existsSync(vaultPluginSettingsFilePath)) {
@@ -411,9 +411,8 @@ export default class VaultNicknamePlugin extends Plugin {
     }
 
     async loadSettings() {
-        // Make a copy of the default settings so the defaults can be
-        // customized per-vault.
-
+        // Setup a fallback nickname that is the name of the vault's parent
+        // folder.
         const personalizedDefaultSettings =
             Object.assign({}, DEFAULT_SETTINGS);
 
@@ -422,17 +421,49 @@ export default class VaultNicknamePlugin extends Plugin {
             personalizedDefaultSettings.nickname = parentFolderName;
         }
 
-        // Load user settings or fallback to the personalized default settings.
+        // Try to load the saved vault nickname.
+        let loadedSettings = {};
+
+        const settingsFilePath = await this.getSettingsFilePath();
+
+        if (existsSync(settingsFilePath)) {
+            // Using fs.readFileSync because the `Vault` API doesn't support
+            // hidden files.
+            const settingsJson = readFileSync(settingsFilePath, 'utf8');
+
+            if (settingsJson) {
+                loadedSettings = JSON.parse(settingsJson);
+            }
+        }
+
+        // Apply the loaded nickname settings.
         this.settings =
-            Object.assign({}, personalizedDefaultSettings, await this.loadData());
+            Object.assign({}, personalizedDefaultSettings, loadedSettings);
 
         this.refreshSelectedVaultName();
     }
 
     async saveSettings() {
-        await this.saveData(this.settings);
+        const settingsFilePath = await this.getSettingsFilePath();
+
+        if (settingsFilePath) {
+            const settingsJson = JSON.stringify(this.settings);
+
+            // Using fs.writeFileSync because the `Vault` API doesn't support
+            // hidden files.
+            writeFileSync(settingsFilePath, settingsJson);
+        }
 
         this.refreshSelectedVaultName();
+    }
+
+    async getSettingsFilePath(): Promise<string> {
+        const settingsFilePath = [
+            this.app.vault.adapter.getBasePath(),
+            VAULT_LOCAL_SETTINGS_FILE_PATH
+        ].join(PATH_SEPARATOR);
+
+        return settingsFilePath;
     }
 }
 
