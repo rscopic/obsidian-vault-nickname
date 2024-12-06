@@ -8,15 +8,6 @@ import {
     normalizePath,
 } from "obsidian";
 
-// Needed for reading nicknames from a hidden file in this and other vaults.
-// Obsidian doesn't offer an API to access hidden files nor files from other
-// vaults.
-import {
-    existsSync,
-    readFileSync,
-    writeFileSync,
-} from "fs";
-
 interface VaultNicknamePluginSettings {
     /// The override vault display name. Used in the vault switcher.
     /// If empty or whitespace, the vault's actual name (folder name) is used.
@@ -72,13 +63,11 @@ export default class VaultNicknamePlugin extends Plugin {
 
         await this.loadSettings();
 
-        const settingsFilePath = await this.getSettingsFilePath();
+        const settingsFilePath = this.getSettingsFilePath();
 
-        if (!existsSync(settingsFilePath)) {
-            // Ensure the plugin's settings file exists as soon as possible.
-            // This is necessary to because the plugin reads this file for
-            // this vault and other vault's nickname when updating the vault
-            // switcher drop down menu items.
+        if (!this.filePathExistsSync(settingsFilePath)) {
+            // Create the nickname file immediately so other vaults can
+            // immediatley display this vault's nickname.
             await this.saveSettings();
         }
 
@@ -97,6 +86,10 @@ export default class VaultNicknamePlugin extends Plugin {
     onLayoutReady() {
         this.vaultSwitcherElement =
             window.activeDocument.querySelector('.workspace-drawer-vault-switcher');
+
+        if (!this.vaultSwitcherElement) {
+            console.error('Vault switcher element not found during onLayoutReady. Cannot update its events.');
+        }
 
         this.useVaultSwitcherCallbacks(true);
         this.refreshVaultDisplayName();
@@ -188,6 +181,11 @@ export default class VaultNicknamePlugin extends Plugin {
     /// to the names provided by the vault's personal Vault Nickname plugin.
     ///
     async onVaultSwitcherClicked() {
+        if (this.vaultSwitcherElement && this.vaultSwitcherElement.hasClass('has-active-menu')) {
+            // Menu is closing. Nothing needs updating.
+            return;
+        }
+
         const vaultSwitcherMenu = await this.waitForSelector('.menu', 100);
 
         if (!vaultSwitcherMenu) {
@@ -196,6 +194,8 @@ export default class VaultNicknamePlugin extends Plugin {
         }
 
         // Ask Obsidian for its list of known vaults.
+        // TODO: This prevents support on mobile (thanks @joethei). Is there an
+        //       alternative or mobile-friendly version?
         const vaults = electron.ipcRenderer.sendSync("vault-list");
         if (!vaults) {
             console.error('Failed to retrieve list of known vaults.');
@@ -229,13 +229,13 @@ export default class VaultNicknamePlugin extends Plugin {
                 VAULT_LOCAL_SETTINGS_FILE_PATH
             ].join(PATH_SEPARATOR));
 
-            if (!existsSync(vaultPluginSettingsFilePath)) {
+            if (!this.filePathExistsSync(vaultPluginSettingsFilePath)) {
                 //console.log("No nickname settings for vault: " + vaultPluginSettingsFilePath);
                 continue;
             }
 
             const vaultPluginSettingsJson =
-                readFileSync(vaultPluginSettingsFilePath);
+                this.readUtf8FileSync(vaultPluginSettingsFilePath);
 
             if (!vaultPluginSettingsJson) {
                 //console.log("Could not read plugin settings: " + vaultPluginSettingsFilePath);
@@ -250,6 +250,7 @@ export default class VaultNicknamePlugin extends Plugin {
             }
 
             titleElement.textContent = vaultPluginSettings.nickname;
+
         }
     }
 
@@ -437,12 +438,10 @@ export default class VaultNicknamePlugin extends Plugin {
 
         let loadedSettings = {};
 
-        const settingsFilePath = await this.getSettingsFilePath();
+        const settingsFilePath = this.getSettingsFilePath();
 
-        if (existsSync(settingsFilePath)) {
-            // Using fs.readFileSync because the `Vault` API doesn't support
-            // hidden files.
-            const settingsJson = readFileSync(settingsFilePath, 'utf8');
+        if (this.filePathExistsSync(settingsFilePath)) {
+            const settingsJson = this.readUtf8FileSync(settingsFilePath);
 
             if (settingsJson) {
                 loadedSettings = JSON.parse(settingsJson);
@@ -461,14 +460,12 @@ export default class VaultNicknamePlugin extends Plugin {
     /// between other instances of the plugin.
     ///
     async saveSettings() {
-        const settingsFilePath = await this.getSettingsFilePath();
+        const settingsFilePath = this.getSettingsFilePath();
 
         if (settingsFilePath) {
             const settingsJson = JSON.stringify(this.settings);
 
-            // Using fs.writeFileSync because the `Vault` API doesn't support
-            // hidden files.
-            writeFileSync(settingsFilePath, settingsJson);
+            this.writeUtf8FileSync(settingsFilePath, settingsJson);
         }
 
         this.refreshVaultDisplayName();
@@ -507,6 +504,21 @@ export default class VaultNicknamePlugin extends Plugin {
             this.app.vault.adapter.getBasePath(),
             VAULT_LOCAL_SETTINGS_FILE_PATH
         ].join(PATH_SEPARATOR);
+    }
+
+    // Using synchronous calls because they prevent momentary flicker when
+    // vault nicknames are applied.
+
+    filePathExistsSync(absoluteFilePath : string) : boolean {
+        return this.app.vault.adapter.fs.existsSync(absoluteFilePath);
+    }
+
+    readUtf8FileSync(absoluteFilePath: string) : string {
+        return this.app.vault.adapter.fs.readFileSync(absoluteFilePath, 'utf8');
+    }
+
+    writeUtf8FileSync(absoluteFilePath: string, content: string) {
+        this.app.vault.adapter.fs.writeFileSync(absoluteFilePath, content, 'utf8');
     }
 }
 
