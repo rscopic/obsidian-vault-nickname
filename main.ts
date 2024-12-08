@@ -37,16 +37,15 @@ export default class VaultNicknamePlugin extends Plugin {
 
     settings: VaultNicknamePluginSettings;
 
-    /// The vault switcher element where this plugin visualizes nicknames.
-    /// This element is cached so that some custom callbacks can check whether
-    /// it has a context menu visible: `hasClass('has-active-menu')`
+    /// The vault switcher (desktop-only). Cached so callbacks can check if
+    /// it's context menu is visible: `hasClass('has-active - menu')`
     ///
-    vaultSwitcherElement: Element | null;
+    desktopVaultSwitcherElement: Element | null;
 
     /// Callbacks invoked whenever the vault switcher is clicked.
     ///
-    vaultSwitcherClickCallback: () => Promise<void>;
-    vaultSwitcherContextMenuCallback: () => Promise<void>;
+    desktopVaultSwitcherClickCallback: () => Promise<void>;
+    desktopVaultSwitcherContextMenuCallback: () => Promise<void>;
 
     /// A callback invoked whenever the user clicks an item in the file tree.
     /// Ensures the app title correctly updates to show the vault's nickname.
@@ -57,8 +56,8 @@ export default class VaultNicknamePlugin extends Plugin {
         this.isEnabled = true;
 
         // Create bound callbacks for access to `this` pointer.
-        this.vaultSwitcherClickCallback = this.onVaultSwitcherClicked.bind(this);
-        this.vaultSwitcherContextMenuCallback = this.onVaultSwitcherContextMenu.bind(this);
+        this.desktopVaultSwitcherClickCallback = this.onDesktopVaultSwitcherClicked.bind(this);
+        this.desktopVaultSwitcherContextMenuCallback = this.onDesktopVaultSwitcherContextMenu.bind(this);
         this.activeLeafChangeCallback = this.onActiveLeafChange.bind(this);
 
         await this.loadSettings();
@@ -66,8 +65,8 @@ export default class VaultNicknamePlugin extends Plugin {
         const settingsFilePath = this.getSettingsFilePath();
 
         if (!this.filePathExistsSync(settingsFilePath)) {
-            // Create the nickname file immediately so other vaults can
-            // immediatley display this vault's nickname.
+            // Ensure the nickname file exists so other vaults can immediately
+            // display its nickname.
             await this.saveSettings();
         }
 
@@ -79,35 +78,35 @@ export default class VaultNicknamePlugin extends Plugin {
     onunload() {
         this.isEnabled = false;
 
-        this.useVaultSwitcherCallbacks(false);
+        this.useDesktopVaultSwitcherCallbacks(false);
         this.refreshVaultDisplayName();
     }
 
     onLayoutReady() {
-        this.vaultSwitcherElement =
+        this.desktopVaultSwitcherElement =
             window.activeDocument.querySelector('.workspace-drawer-vault-switcher');
 
-        if (!this.vaultSwitcherElement) {
-            console.error('Vault switcher element not found during onLayoutReady. Cannot update its events.');
-        }
-
-        this.useVaultSwitcherCallbacks(true);
+        this.useDesktopVaultSwitcherCallbacks(true);
         this.refreshVaultDisplayName();
     }
 
-    useVaultSwitcherCallbacks(use: boolean) {
-        if (!this.vaultSwitcherElement) {
+    useDesktopVaultSwitcherCallbacks(use: boolean) {
+        if (Platform.isMobile) {
+            return;
+        }
+
+        if (!this.desktopVaultSwitcherElement) {
             console.error('Vault switcher element not found. Cannot update its events.');
             return;
         }
 
         // Doubles as a sanity-unsubscribe when `use` is true.
-        this.vaultSwitcherElement.removeEventListener('click', this.vaultSwitcherClickCallback);
-        this.vaultSwitcherElement.removeEventListener('contextmenu', this.vaultSwitcherContextMenuCallback);
+        this.desktopVaultSwitcherElement.removeEventListener('click', this.desktopVaultSwitcherClickCallback);
+        this.desktopVaultSwitcherElement.removeEventListener('contextmenu', this.desktopVaultSwitcherContextMenuCallback);
 
         if (use) {
-            this.vaultSwitcherElement.addEventListener('click', this.vaultSwitcherClickCallback);
-            this.vaultSwitcherElement.addEventListener('contextmenu', this.vaultSwitcherContextMenuCallback);
+            this.desktopVaultSwitcherElement.addEventListener('click', this.desktopVaultSwitcherClickCallback);
+            this.desktopVaultSwitcherElement.addEventListener('contextmenu', this.desktopVaultSwitcherContextMenuCallback);
         }
     }
 
@@ -180,8 +179,14 @@ export default class VaultNicknamePlugin extends Plugin {
     /// This function changes the vault names shown in the vault popup menu
     /// to the names provided by the vault's personal Vault Nickname plugin.
     ///
-    async onVaultSwitcherClicked() {
-        if (this.vaultSwitcherElement && this.vaultSwitcherElement.hasClass('has-active-menu')) {
+    async onDesktopVaultSwitcherClicked() {
+        if (Platform.isMobile) {
+            // Mobile UI uses a native pop-up for the vault switcher which
+            // cannot be modified by plugins. Therefore, exit early.
+            return;
+        }
+
+        if (this.desktopVaultSwitcherElement && this.desktopVaultSwitcherElement.hasClass('has-active-menu')) {
             // Menu is closing. Nothing needs updating.
             return;
         }
@@ -258,11 +263,16 @@ export default class VaultNicknamePlugin extends Plugin {
     /// Adds a "Set nickname" item to the spawned menu as a shortcut to the
     /// plugin's settings page.
     ///
-    async onVaultSwitcherContextMenu() {
+    async onDesktopVaultSwitcherContextMenu() {
+        if (Platform.isMobile) {
+            // Feature doesn't exist on mobile.
+            return;
+        }
+
         // Ensure the newest menu is found. Otherwise, when the user
         // context-clicks consecutively, this would find and add the shortcut
         // to the earlier, soon-to-be closed menu.
-        if (this.vaultSwitcherElement && this.vaultSwitcherElement.hasClass('has-active-menu')) {
+        if (this.desktopVaultSwitcherElement && this.desktopVaultSwitcherElement.hasClass('has-active-menu')) {
 
             // Obsidian says that a menu already exists. Wait for it to be
             // destroyed before looking for the new one.
@@ -399,9 +409,13 @@ export default class VaultNicknamePlugin extends Plugin {
     /// Change the display name of the active vault in the workspace's vault
     /// switcher drawer and the app window's title.
     ///
-    setVaultDisplayName(displayName: string) {
-        const selectedVaultNameElement =
-            window.activeDocument.querySelector('.workspace-drawer-vault-name');
+    async setVaultDisplayName(displayName: string) {
+        const selectedVaultNameElement = await this.getVaultTitleElement();
+
+        if (!selectedVaultNameElement) {
+            console.error('Vault name element not found. Cannot apply nickname.');
+            return;
+        }
 
         if (selectedVaultNameElement) {
             selectedVaultNameElement.textContent = displayName;
@@ -469,6 +483,14 @@ export default class VaultNicknamePlugin extends Plugin {
         }
 
         this.refreshVaultDisplayName();
+    }
+
+    async getVaultTitleElement(): Promise<Element | null> {
+        // A timeout is necessary to reliably grab the title on mobile startup.
+        return await this.waitForSelector(
+            Platform.isDesktop ? '.workspace-drawer-vault-name' : '.workspace-drawer-header-name-text',
+            200
+        );
     }
 
     /// Get the name of the vault's parent folder. This is used as the plugin's
