@@ -4,6 +4,7 @@ import {
     Plugin,
     PluginSettingTab,
     Setting,
+    TAbstractFile,
     WorkspaceLeaf,
     normalizePath,
 } from "obsidian";
@@ -50,7 +51,12 @@ export default class VaultNicknamePlugin extends Plugin {
     /// A callback invoked whenever the user clicks an item in the file tree.
     /// Ensures the app title correctly updates to show the vault's nickname.
     ///
-    activeLeafChangeCallback: (file: WorkspaceLeaf | null) => void;
+    vaultItemRenamedCallback: (_: TAbstractFile | null) => void;
+
+    /// A callback invoked whenever the user clicks an item in the file tree.
+    /// Ensures the app title correctly updates to show the vault's nickname.
+    ///
+    activeLeafChangeCallback: (_: WorkspaceLeaf | null) => void;
 
     async onload() {
         this.isEnabled = true;
@@ -58,6 +64,7 @@ export default class VaultNicknamePlugin extends Plugin {
         // Create bound callbacks for access to `this` pointer.
         this.desktopVaultSwitcherClickCallback = this.onDesktopVaultSwitcherClicked.bind(this);
         this.desktopVaultSwitcherContextMenuCallback = this.onDesktopVaultSwitcherContextMenu.bind(this);
+        this.vaultItemRenamedCallback = this.onVaultItemRenamed.bind(this);
         this.activeLeafChangeCallback = this.onActiveLeafChange.bind(this);
 
         await this.loadSettings();
@@ -72,6 +79,7 @@ export default class VaultNicknamePlugin extends Plugin {
 
         this.addSettingTab(new VaultNicknameSettingTab(this.app, this));
         this.app.workspace.onLayoutReady(this.onLayoutReady.bind(this));
+        this.registerEvent(this.app.vault.on('rename', this.vaultItemRenamedCallback));
         this.registerEvent(this.app.workspace.on('active-leaf-change', this.activeLeafChangeCallback));
     }
 
@@ -166,6 +174,13 @@ export default class VaultNicknamePlugin extends Plugin {
                 subtree: true
             });
         });
+    }
+
+    /// Invoked when a vault item is renamed. Applies the vault's nickname to
+    /// the window title.
+    ///
+    onVaultItemRenamed(_: TAbstractFile | null) {
+        this.refreshVaultDisplayName();
     }
 
     /// Invoked when the active workspace leaf was changed. Applies the vault's
