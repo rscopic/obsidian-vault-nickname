@@ -10,15 +10,23 @@ import {
 } from "obsidian";
 
 interface VaultNicknamePluginSettings {
+    overrideAppTitle: string;
+}
+
+interface VaultNicknameSharedPluginSettings {
     /// The override vault display name. Used in the vault switcher.
     /// If empty or whitespace, the vault's actual name (folder name) is used.
     ///
     nickname: string;
 }
 
-const DEFAULT_SETTINGS: VaultNicknamePluginSettings = {
+const DEFAULT_PLUGIN_SETTINGS: VaultNicknamePluginSettings = {
+    overrideAppTitle: 'override-app-title:file-first',
+};
+
+const DEFAULT_SHARED_SETTINGS: VaultNicknameSharedPluginSettings = {
     nickname: "My Vault Nickname",
-}
+};
 
 const PATH_SEPARATOR: string = Platform.isWin ? '\\' : '/';
 
@@ -26,7 +34,7 @@ const PATH_SEPARATOR: string = Platform.isWin ? '\\' : '/';
 /// stored in the vault's root (as a hidden file) to ensure it can be found by
 /// instances of the plugin running in other vaults.
 ///
-const VAULT_LOCAL_SETTINGS_FILE_PATH = ".vault-nickname";
+const VAULT_LOCAL_SHARED_SETTINGS_FILE_PATH = ".vault-nickname";
 
 export default class VaultNicknamePlugin extends Plugin {
 
@@ -37,6 +45,8 @@ export default class VaultNicknamePlugin extends Plugin {
     isEnabled = false;
 
     settings: VaultNicknamePluginSettings;
+
+    sharedSettings: VaultNicknameSharedPluginSettings;
 
     /// The vault switcher (desktop-only). Cached so callbacks can check if
     /// it's context menu is visible: `hasClass('has-active - menu')`
@@ -69,7 +79,7 @@ export default class VaultNicknamePlugin extends Plugin {
 
         await this.loadSettings();
 
-        const settingsFilePath = this.getSettingsFilePath();
+        const settingsFilePath = this.getSharedSettingsFilePath();
 
         if (!this.filePathExistsSync(settingsFilePath)) {
             // Ensure the nickname file exists so other vaults can immediately
@@ -121,25 +131,28 @@ export default class VaultNicknamePlugin extends Plugin {
     /// Query for a selector. If not found, try observing for
     /// `timeoutMilliseconds` for it to be added, otherwise return `null`.
     ///
-    async waitForSelector(selector: string, timeoutMilliseconds: number) : Promise<Element|null> {
-        return new Promise<Element|null>(resolve => {
-            if (window.activeDocument.querySelector(selector)) {
+    async waitForSelector(searchFrom: Document | Element , selector: string, timeoutMilliseconds: number) : Promise<Element|null> {
+        return new Promise<Element | null>(resolve => {
+            const element = searchFrom.querySelector(selector);
+
+            if (element) {
                 // Already exists.
-                return resolve(document.querySelector(selector));
+                return resolve(element);
             }
 
+            // Wait for it appear.
             const timeout = setTimeout(() => resolve(null), timeoutMilliseconds);
 
-            // Otherwise, use MutationObserver to track changes in the DOM.
             const observer = new MutationObserver(mutations => {
-                if (document.querySelector(selector)) {
+                const element = searchFrom.querySelector(selector);
+                if (element) {
                     clearTimeout(timeout);
                     observer.disconnect();
-                    resolve(document.querySelector(selector));
+                    resolve(element);
                 }
             });
 
-            observer.observe(document.body, {
+            observer.observe(searchFrom, {
                 childList: true,
                 subtree: true
             });
@@ -158,9 +171,9 @@ export default class VaultNicknamePlugin extends Plugin {
                 return;
             }
 
+            // Wait for it to be removed.
             const timeout = setTimeout(() => resolve(), timeoutMilliseconds);
 
-            // Otherwise, use MutationObserver to track changes in the DOM
             const observer = new MutationObserver(() => {
                 if (!element.parentNode) {
                     clearTimeout(timeout);
@@ -206,7 +219,8 @@ export default class VaultNicknamePlugin extends Plugin {
             return;
         }
 
-        const vaultSwitcherMenu = await this.waitForSelector('.menu', 100);
+        const vaultSwitcherMenu =
+            await this.waitForSelector(window.activeDocument, '.menu', 100);
 
         if (!vaultSwitcherMenu) {
             console.error('The vault switcher menu was not found after the timeout.');
@@ -246,7 +260,7 @@ export default class VaultNicknamePlugin extends Plugin {
 
             const vaultPluginSettingsFilePath = normalizePath([
                 vault.path,
-                VAULT_LOCAL_SETTINGS_FILE_PATH
+                VAULT_LOCAL_SHARED_SETTINGS_FILE_PATH
             ].join(PATH_SEPARATOR));
 
             if (!this.filePathExistsSync(vaultPluginSettingsFilePath)) {
@@ -300,7 +314,8 @@ export default class VaultNicknamePlugin extends Plugin {
         }
 
         // Get the new context menu.
-        const vaultSwitcherMenu = await this.waitForSelector('.menu', 200);
+        const vaultSwitcherMenu =
+            await this.waitForSelector(window.activeDocument, '.menu', 200);
 
         if (!vaultSwitcherMenu) {
             console.error('The vault switcher menu was not found after the timeout.');
@@ -378,7 +393,9 @@ export default class VaultNicknamePlugin extends Plugin {
         // Open the settings window.
         this.app.commands.executeCommandById('app:open-settings');
 
-        const settingsMenu = await this.waitForSelector('.mod-settings', 200);
+        const settingsMenu =
+            await this.waitForSelector(window.activeDocument, '.mod-settings', 200);
+
         if (!settingsMenu) {
             console.error('The vault settings menu was not found after the timeout.');
             return;
@@ -386,7 +403,9 @@ export default class VaultNicknamePlugin extends Plugin {
 
         // Wait for any tab item to appear to know when it's go-time to find
         // tab for this plugin.
-        const anyTab = await this.waitForSelector('.vertical-tab-nav-item', 200);
+        const anyTab =
+            await this.waitForSelector(window.activeDocument, '.vertical-tab-nav-item', 200);
+
         if (!anyTab) {
             console.error('Timeout while waiting for a settings menu tab to be found.');
             return;
@@ -414,8 +433,8 @@ export default class VaultNicknamePlugin extends Plugin {
     ///
     refreshVaultDisplayName() {
         const currentVaultName =
-            (this.isEnabled && this.settings && this.settings.nickname && this.settings.nickname.trim()) ?
-                this.settings.nickname.trim() :
+            (this.isEnabled && this.sharedSettings && this.sharedSettings.nickname && this.sharedSettings.nickname.trim()) ?
+                this.sharedSettings.nickname.trim() :
                 this.app.vault.getName();
 
         this.setVaultDisplayName(currentVaultName);
@@ -424,7 +443,7 @@ export default class VaultNicknamePlugin extends Plugin {
     /// Change the display name of the active vault in the workspace's vault
     /// switcher drawer and the app window's title.
     ///
-    async setVaultDisplayName(displayName: string) {
+    async setVaultDisplayName(vaultDisplayName: string) {
         const selectedVaultNameElement = await this.getVaultTitleElement();
 
         if (!selectedVaultNameElement) {
@@ -433,15 +452,69 @@ export default class VaultNicknamePlugin extends Plugin {
         }
 
         if (selectedVaultNameElement) {
-            selectedVaultNameElement.textContent = displayName;
+            selectedVaultNameElement.textContent = vaultDisplayName;
+        }
+
+        this.setAppTitle(vaultDisplayName);
+    }
+
+    /// Change the app's title. This applies the provided vault name and
+    /// optionally switches the order of the vault and document names.
+    ///
+    setAppTitle(vaultDisplayName: string) {
+        if (Platform.isMobileApp) {
+            return;
+        }
+
+        if (this.settings.overrideAppTitle === 'override-app-title:off') {
+            this.app.workspace.updateTitle();
+            return;
         }
 
         const titleSeparator = ' - ';
-        const titleParts = window.activeDocument.title.split(titleSeparator);
-        if (titleParts.length > 2) {
-            titleParts[titleParts.length - 2] = displayName;
-            const title = titleParts.join(titleSeparator);
-            window.activeDocument.title = title;
+
+        // Extract Obsidian version from title: "<Vault Name> - Obsidian v.1.7.7"
+        const appTitle = this.app.title;
+        if (!appTitle) {
+            console.error("no this.app.title");
+            return;
+        }
+
+        const titleParts = appTitle.split(titleSeparator);
+        if (!titleParts || titleParts.length < 2) {
+            console.error("unexpected title format: " + appTitle);
+            return;
+        }
+
+        const obsidianVersion = titleParts[titleParts.length - 1];
+
+        // Get the document title
+        const documentTitle = (() => {
+            const activeEditor = this.app.workspace.activeEditor;
+            if (activeEditor && activeEditor.titleEl) {
+                return activeEditor.titleEl.textContent;
+            }
+
+            // Had tried grabbing this from ".workspace-leaf.mod-active"'s
+            // ".view-header-title" for more robus localization support, but
+            // encountered timing issues.
+            return 'New tab';
+        })();
+
+        // Apply the title
+        if (this.settings.overrideAppTitle === 'override-app-title:vault-first') {
+            window.activeDocument.title = [
+                vaultDisplayName,
+                documentTitle,
+                obsidianVersion
+            ].join(titleSeparator);
+        }
+        else {
+            window.activeDocument.title = [
+                documentTitle,
+                vaultDisplayName,
+                obsidianVersion
+            ].join(titleSeparator);
         }
     }
 
@@ -450,36 +523,29 @@ export default class VaultNicknamePlugin extends Plugin {
     /// other instances of the plugin.
     ///
     async loadSettings() {
-        // Overwrite DEFAULT_SETTINGS with a default nickname that is
-        // personalized to this vault's file path. We will use the name of the
-        // vault's parent folder as the default nickname.
-
-        const personalizedDefaultSettings =
-            Object.assign({}, DEFAULT_SETTINGS);
+        // Default the nickname to the parent folder's name.
+        const loadedSharedSettings: VaultNicknameSharedPluginSettings =
+            Object.assign({}, DEFAULT_SHARED_SETTINGS);
 
         const parentFolderName = this.getVaultParentFolderName();
         if (parentFolderName) {
-            personalizedDefaultSettings.nickname = parentFolderName;
+            loadedSharedSettings.nickname = parentFolderName;
         }
 
-        // Setup an object to receive the nickname as read from the hidden
-        // nickname file in the vault's root.
+        // Overwrite default nickname with previously saved value.
+        const sharedSettingsFilePath = this.getSharedSettingsFilePath();
 
-        let loadedSettings = {};
+        if (this.filePathExistsSync(sharedSettingsFilePath)) {
+            const settingsJson = this.readUtf8FileSync(sharedSettingsFilePath);
 
-        const settingsFilePath = this.getSettingsFilePath();
-
-        if (this.filePathExistsSync(settingsFilePath)) {
-            const settingsJson = this.readUtf8FileSync(settingsFilePath);
-
-            if (settingsJson) {
-                loadedSettings = JSON.parse(settingsJson);
-            }
+            loadedSharedSettings
+                Object.assign(loadedSharedSettings, JSON.parse(settingsJson));
         }
 
         // Apply the loaded nickname settings.
-        this.settings =
-            Object.assign({}, personalizedDefaultSettings, loadedSettings);
+        this.sharedSettings = loadedSharedSettings;
+
+        this.settings = Object.assign({}, DEFAULT_PLUGIN_SETTINGS, await this.loadData());
 
         this.refreshVaultDisplayName();
     }
@@ -489,13 +555,15 @@ export default class VaultNicknamePlugin extends Plugin {
     /// between other instances of the plugin.
     ///
     async saveSettings() {
-        const settingsFilePath = this.getSettingsFilePath();
+        const sharedSettingsFilePath = this.getSharedSettingsFilePath();
 
-        if (settingsFilePath) {
-            const settingsJson = JSON.stringify(this.settings);
+        if (sharedSettingsFilePath) {
+            const sharedSettingsJson = JSON.stringify(this.sharedSettings, null, 2);
 
-            this.writeUtf8FileSync(settingsFilePath, settingsJson);
+            this.writeUtf8FileSync(sharedSettingsFilePath, sharedSettingsJson);
         }
+
+        await this.saveData(this.settings);
 
         this.refreshVaultDisplayName();
     }
@@ -503,6 +571,7 @@ export default class VaultNicknamePlugin extends Plugin {
     async getVaultTitleElement(): Promise<Element | null> {
         // A timeout is necessary to reliably grab the title on mobile startup.
         return await this.waitForSelector(
+            window.activeDocument,
             Platform.isDesktop ? '.workspace-drawer-vault-name' : '.workspace-drawer-header-name-text',
             200
         );
@@ -534,12 +603,12 @@ export default class VaultNicknamePlugin extends Plugin {
     /// in the plugin's install folder but it is currently tricky to access
     /// files in other vaults' config folder.
     ///
-    getSettingsFilePath(): string {
+    getSharedSettingsFilePath(): string {
         // Ideally we would use a Vault API to get the TFile of the settings
         // file. However, that API does not support hidden files.
         return [
             this.app.vault.adapter.getBasePath(),
-            VAULT_LOCAL_SETTINGS_FILE_PATH
+            VAULT_LOCAL_SHARED_SETTINGS_FILE_PATH
         ].join(PATH_SEPARATOR);
     }
 
@@ -576,14 +645,18 @@ class VaultNicknameSettingTab extends PluginSettingTab {
         new Setting(containerEl)
             .setName('Vault nickname')
             .setDesc('Override the vault\'s display name.')
-            .setTooltip("A vault nickname controls the text shown in the workspace's vault switcher. The 'Manage Vaults' window will continue showing the true vault name as these may be disambiguated by their visible path.")
+            .setTooltip(
+                Platform.isDesktop ?
+                    "A vault nickname controls the text shown in the workspace's vault switcher. The 'Manage Vaults' window will continue showing the true vault name as these may be disambiguated by their visible path." :
+                    "A vault nickname controls the text shown in the workspace's side panel."
+            )
             .addText((textComponent) => {
                 // A text field to assign the vault's nickname.
                 textComponent
                     .setPlaceholder('No nickname')
-                    .setValue(this.plugin.settings.nickname)
+                    .setValue(this.plugin.sharedSettings.nickname)
                     .onChange(async newValue => {
-                        this.plugin.settings.nickname = newValue;
+                        this.plugin.sharedSettings.nickname = newValue;
                         await this.plugin.saveSettings();
                     });
             })
@@ -600,14 +673,35 @@ class VaultNicknameSettingTab extends PluginSettingTab {
                             return;
                         }
 
-                        this.plugin.settings.nickname = parentFolderName;
+                        this.plugin.sharedSettings.nickname = parentFolderName;
 
                         // Refresh the nickname field in the settings window.
                         this.display();
 
                         await this.plugin.saveSettings();
-                    })
+                    });
             });
+
+        if (Platform.isDesktopApp) {
+            new Setting(containerEl)
+                .setName('Nickname in app title')
+                .setDesc('Position and use of vault nickname in the app title.')
+                .addDropdown(dropdownComponent => {
+                    dropdownComponent.addOption('override-app-title:off', 'Off');
+                    dropdownComponent.addOption('override-app-title:vault-first', 'Vault name first');
+                    dropdownComponent.addOption('override-app-title:file-first', 'File name first');
+
+                    dropdownComponent.setValue(this.plugin.settings.overrideAppTitle);
+
+                    dropdownComponent.onChange(async newValue => {
+                        this.plugin.settings.overrideAppTitle = newValue;
+
+                        this.plugin.refreshVaultDisplayName();
+
+                        await this.plugin.saveSettings();
+                    });
+                });
+        }
     }
 }
 
