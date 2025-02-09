@@ -5,11 +5,12 @@
 ## Features:
 * Customize a vault's display name without renaming its folder.
 * Choice to change the app's title to display vault names before the active document's name.
+  * E.g., "**\<Vault\>** - **\<Document\>**" rather than the default "**\<Document\>** - **\<Vault\>**"
 * A "Set nickname" shortcut found in the vault switcher's context menu provides quick access to the settings (PC-only).  
    ![The vault-switcher context menu showing quick access to the plugin's settings.](docs/media/vault-nickname-settings-quick-access.png)
 
 ## Motive:
-This plugin is intended to help disambiguate vaults that share the same name. This is common for users who adhere to a standard folder structure between multiple projects. E.g., "docs", "Obsidian", etc.
+This plugin is intended to help disambiguate vaults that share the same folder name. This is common for users who adhere to a standard file structure between multiple projects. E.g., "docs/", "Obsidian/", etc.
 
 ## Install guide:
 1. Open Obsidian's **Settings**.
@@ -26,7 +27,7 @@ This plugin is intended to help disambiguate vaults that share the same name. Th
 > [!IMPORTANT]  
 > 🚨 Vault Nickname must be installed in each vault where you wish to see other vault nicknames from.
 >
-> This is required because plugins can only affect the user interface of vaults where they're installed. If a vault doesn't need a nickname but needs to see other vault's nicknames, install the plugin and clear its vault nickname field.
+> This is required because plugins can only affect the user interface of vaults where they're installed. If a vault doesn't need a nickname itself, but needs to see other vaults' nicknames, you may still install the plugin and simply clear the nickname field for the already-correct vault.
 
 ## Plugin settings:
 ![The plugin's settings. The nickname overrides the name shown in the bottom left.](docs/media/vault-nickname-settings.png)
