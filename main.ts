@@ -81,7 +81,19 @@ export default class VaultNicknamePlugin extends Plugin {
 
         const settingsFilePath = this.getSharedSettingsFilePath();
 
-        if (!this.filePathExistsSync(settingsFilePath)) {
+        let saveSettingsExist = false;
+
+        await this.app.vault.adapter.exists(settingsFilePath)
+            .then(
+                (exists) => {
+                    saveSettingsExist = exists;
+                },
+                (rejectReason) => {
+                    saveSettingsExist = false;
+                }
+            );
+
+        if (!saveSettingsExist) {
             // Ensure the nickname file exists so other vaults can immediately
             // display its nickname.
             await this.saveSettings();
@@ -228,8 +240,8 @@ export default class VaultNicknamePlugin extends Plugin {
         }
 
         // Ask Obsidian for its list of known vaults.
-        // TODO: This prevents support on mobile (thanks @joethei). Is there an
-        //       alternative or mobile-friendly version?
+        // TODO: This prevents support on mobile (thanks @joethei for
+        //       identifying). Need to find a mobile-friendly alternative.
         const vaults = electron.ipcRenderer.sendSync("vault-list");
         if (!vaults) {
             console.error('Failed to retrieve list of known vaults.');
@@ -253,9 +265,10 @@ export default class VaultNicknamePlugin extends Plugin {
             // by @mnaoumov (https://forum.obsidian.md/t/sharing-plugin-data-between-vaults-stumped-by-override-config-folder/92570/2),
             // to learn a vault's config folder. However, we would still need
             // a fallback '.obsidian' literal to handle the default case of a
-            // vault using the normal config folder because in those cases the
-            // function returns `null`. Having a string literal for the default
-            // config folder causes trouble with ObsidianReviewBot on github.
+            // vault using the normal config folder (because in those cases,
+            // the function returns `null`). Having a string literal for the
+            // default config folder causes trouble with ObsidianReviewBot on
+            // github.
             //const vaultConfigFolderName = App.getOverrideConfigDir(vaultKey);
 
             const vaultPluginSettingsFilePath = normalizePath([
