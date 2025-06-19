@@ -12,6 +12,10 @@
 ## Motive:
 This plugin is intended to help disambiguate vaults that share the same folder name. This is common for users who adhere to a standard file structure between multiple projects. E.g., "docs/", "Obsidian/", etc.
 
+## Supporters:
+
+Big thank you to [@claremacrae](https://github.com/claremacrae) for her generous github sponsorship! ❤️
+
 ## Install guide:
 1. Open Obsidian's **Settings**.
 2. Choose **Community plugins** from the left side bar.
@@ -39,4 +43,3 @@ The name to display instead of the vault's folder name. When this is blank, the 
 ### Nickname in app title
 
 Choose how the nickname is applied to the app's title. The default value is "File name first" which is consistent with Obsidian's default behavior except the vault's nickname will be used.
-
