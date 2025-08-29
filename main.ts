@@ -1,5 +1,6 @@
 import {
     App,
+    Menu,
     Platform,
     Plugin,
     PluginSettingTab,
@@ -53,11 +54,6 @@ export default class VaultNicknamePlugin extends Plugin {
     ///
     desktopVaultSwitcherElement: Element | null;
 
-    /// Callbacks invoked whenever the vault switcher is clicked.
-    ///
-    desktopVaultSwitcherClickCallback: () => Promise<void>;
-    desktopVaultSwitcherContextMenuCallback: () => Promise<void>;
-
     /// A callback invoked whenever the user clicks an item in the file tree.
     /// Ensures the app title correctly updates to show the vault's nickname.
     ///
@@ -72,8 +68,6 @@ export default class VaultNicknamePlugin extends Plugin {
         this.isEnabled = true;
 
         // Create bound callbacks for access to `this` pointer.
-        this.desktopVaultSwitcherClickCallback = this.onDesktopVaultSwitcherClicked.bind(this);
-        this.desktopVaultSwitcherContextMenuCallback = this.onDesktopVaultSwitcherContextMenu.bind(this);
         this.vaultItemRenamedCallback = this.onVaultItemRenamed.bind(this);
         this.activeLeafChangeCallback = this.onActiveLeafChange.bind(this);
 
@@ -108,35 +102,65 @@ export default class VaultNicknamePlugin extends Plugin {
     onunload() {
         this.isEnabled = false;
 
-        this.useDesktopVaultSwitcherCallbacks(false);
+        this.useVaultSwitcherCallbacks(false);
         this.refreshVaultDisplayName();
+
+        if (this.desktopVaultSwitcherElement) {
+            this.desktopVaultSwitcherElement.remove();
+            this.desktopVaultSwitcherElement = null;
+        }
     }
 
+    /// Creates an invisible 'interceptor' element over the vault switcher
+    /// element. This is used to catch click events and recreate Obsidian's
+    /// normal menus, but displaying the vault nicknames. This was necessary
+    /// to make the plugin work on macOS where these context menus are rendered
+    /// natively and otherwise couldn't be modified.
+    ///
     onLayoutReady() {
-        this.desktopVaultSwitcherElement =
+        const originalDesktopVaultSwitcherElement =
             window.activeDocument.querySelector('.workspace-drawer-vault-switcher');
 
-        this.useDesktopVaultSwitcherCallbacks(true);
+        if (!originalDesktopVaultSwitcherElement) {
+            console.error('Vault switcher element not found. Cannot create element to intercept its events.');
+        }
+        else {
+            // Necessary to make the interceptor element fit to the vault
+            // switcher's size.
+            originalDesktopVaultSwitcherElement.style.position = 'relative';
+
+            this.desktopVaultSwitcherElement =
+                originalDesktopVaultSwitcherElement.createDiv('.workspace-drawer-vault-switcher-vault-nickname-interceptor');
+
+            Object.assign(
+                this.desktopVaultSwitcherElement.style,
+                {
+                    position:        'absolute',
+                    top:             '0',
+                    left:            '0',
+                    width:           '100%',
+                    height:          '100%',
+                    backgroundColor: 'transparent',
+                    display:         'none',
+                }
+            );
+
+            this.desktopVaultSwitcherElement.addEventListener('click', this.onVaultSwitcherClicked.bind(this));
+            this.desktopVaultSwitcherElement.addEventListener('contextmenu', this.onVaultSwitcherContextMenu.bind(this));
+
+            this.useVaultSwitcherCallbacks(true);
+        }
+
         this.refreshVaultDisplayName();
     }
 
-    useDesktopVaultSwitcherCallbacks(use: boolean) {
+    useVaultSwitcherCallbacks(use: boolean) {
         if (Platform.isMobile) {
             return;
         }
 
-        if (!this.desktopVaultSwitcherElement) {
-            console.error('Vault switcher element not found. Cannot update its events.');
-            return;
-        }
-
-        // Doubles as a sanity-unsubscribe when `use` is true.
-        this.desktopVaultSwitcherElement.removeEventListener('click', this.desktopVaultSwitcherClickCallback);
-        this.desktopVaultSwitcherElement.removeEventListener('contextmenu', this.desktopVaultSwitcherContextMenuCallback);
-
-        if (use) {
-            this.desktopVaultSwitcherElement.addEventListener('click', this.desktopVaultSwitcherClickCallback);
-            this.desktopVaultSwitcherElement.addEventListener('contextmenu', this.desktopVaultSwitcherContextMenuCallback);
+        if (this.desktopVaultSwitcherElement) {
+            this.desktopVaultSwitcherElement.style.display = use ? 'block' : 'hidden';
         }
     }
 
@@ -171,36 +195,6 @@ export default class VaultNicknamePlugin extends Plugin {
         });
     }
 
-    /// Wait for an element to be removed.
-    ///
-    async waitForElementToBeRemoved(element: Element, timeoutMilliseconds: number) : Promise<void> {
-        return new Promise(resolve => {
-            const parent = element.parentNode;
-
-            if (!parent) {
-                // Already removed.
-                resolve();
-                return;
-            }
-
-            // Wait for it to be removed.
-            const timeout = setTimeout(() => resolve(), timeoutMilliseconds);
-
-            const observer = new MutationObserver(() => {
-                if (!element.parentNode) {
-                    clearTimeout(timeout);
-                    observer.disconnect();
-                    resolve();
-                }
-            });
-
-            observer.observe(parent, {
-                childList: true,
-                subtree: true
-            });
-        });
-    }
-
     /// Invoked when a vault item is renamed. Applies the vault's nickname to
     /// the window title.
     ///
@@ -219,47 +213,27 @@ export default class VaultNicknamePlugin extends Plugin {
     /// This function changes the vault names shown in the vault popup menu
     /// to the names provided by the vault's personal Vault Nickname plugin.
     ///
-    async onDesktopVaultSwitcherClicked() {
-        if (Platform.isMobile) {
-            // Mobile UI uses a native pop-up for the vault switcher which
-            // cannot be modified by plugins. Therefore, exit early.
+    onVaultSwitcherClicked(event: Event) {
+        if (event.shiftKey) {
+            // Allow holding the shift key to call the original behavior.
             return;
         }
 
-        if (this.desktopVaultSwitcherElement && this.desktopVaultSwitcherElement.hasClass('has-active-menu')) {
-            // Menu is closing. Nothing needs updating.
-            return;
-        }
+        event.stopPropagation();
 
-        const vaultSwitcherMenu =
-            await this.waitForSelector(window.activeDocument, '.menu', 100);
-
-        if (!vaultSwitcherMenu) {
-            console.error('The vault switcher menu was not found after the timeout.');
-            return;
-        }
-
-        // Ask Obsidian for its list of known vaults.
-        // TODO: This prevents support on mobile (thanks @joethei for
-        //       identifying). Need to find a mobile-friendly alternative.
+        // TODO: This is at least one API that prevents support on mobile
+        //       (thanks @joethei for identifying). Need to find a
+        //       mobile - friendly alternative.
         const vaults = electron.ipcRenderer.sendSync("vault-list");
-        if (!vaults) {
-            console.error('Failed to retrieve list of known vaults.');
-        }
 
-        // Apply the vault nicknames to the vault switcher's menu items.
-        const vaultKeys = Object.keys(vaults);
-        const menuItems = vaultSwitcherMenu.querySelectorAll('.menu-item');
-        const min = Math.min(menuItems.length, vaultKeys.length);
-        for (let i = 0; i < min; ++i) {
-            const vaultKey = vaultKeys[i];
+        const menu = new Menu();
+
+        for (let vaultKey in vaults) {
             const vault = vaults[vaultKey];
 
-            const titleElement = menuItems[i].querySelector('.menu-item-title');
-            if (!titleElement) {
-                console.error('No title element for this vault: ' + vault.path);
-                continue;
-            }
+            const vaultPath = normalizePath(vault.path);
+
+            let vaultName = vaultPath.substring(vaultPath.lastIndexOf('/') + 1);
 
             // We could use the following undocumented function kindly shared
             // by @mnaoumov (https://forum.obsidian.md/t/sharing-plugin-data-between-vaults-stumped-by-override-config-folder/92570/2),
@@ -291,111 +265,77 @@ export default class VaultNicknamePlugin extends Plugin {
 
             const vaultPluginSettings = JSON.parse(vaultPluginSettingsJson);
 
-            if (!vaultPluginSettings || !vaultPluginSettings.nickname || !vaultPluginSettings.nickname.trim()) {
-                //console.log("No nickname in json or nickname is blank: " + vaultPluginSettingsFilePath);
-                continue;
+            if (vaultPluginSettings && vaultPluginSettings.nickname && vaultPluginSettings.nickname.trim()) {
+                vaultName = vaultPluginSettings.nickname.trim();
             }
 
-            titleElement.textContent = vaultPluginSettings.nickname;
-
+            menu.addItem((item) =>
+                item
+                    .setTitle(vaultName)
+                    .setChecked(vault.path === this.app.vault.adapter.basePath)
+                    .onClick(() =>
+                        window.open(`obsidian://open?vault=${vaultKey}`)
+                    )
+            );
         }
+
+        menu.addSeparator();
+
+        menu.addItem((item) =>
+            item
+                .setTitle(window.OBSIDIAN_DEFAULT_I18N.interface.manageVaults)
+                .setIcon('open-vault')
+                .onClick(() =>
+                    this.app.commands.executeCommandById('app:open-vault')
+                )
+        );
+
+        menu.showAtMouseEvent(event);
     }
 
     /// Invoked when the user context-clicks on the vault switcher drop down.
     /// Adds a "Set nickname" item to the spawned menu as a shortcut to the
     /// plugin's settings page.
     ///
-    async onDesktopVaultSwitcherContextMenu() {
+    async onVaultSwitcherContextMenu() {
         if (Platform.isMobile) {
             // Feature doesn't exist on mobile.
             return;
         }
 
-        // Ensure the newest menu is found. Otherwise, when the user
-        // context-clicks consecutively, this would find and add the shortcut
-        // to the earlier, soon-to-be closed menu.
-        if (this.desktopVaultSwitcherElement && this.desktopVaultSwitcherElement.hasClass('has-active-menu')) {
-
-            // Obsidian says that a menu already exists. Wait for it to be
-            // destroyed before looking for the new one.
-
-            const alreadyOpenMenu = window.activeDocument.querySelector('.menu');
-
-            if (alreadyOpenMenu) {
-                await this.waitForElementToBeRemoved(alreadyOpenMenu, 200);
-            }
-        }
-
-        // Get the new context menu.
-        const vaultSwitcherMenu =
-            await this.waitForSelector(window.activeDocument, '.menu', 200);
-
-        if (!vaultSwitcherMenu) {
-            console.error('The vault switcher menu was not found after the timeout.');
+        if (event.shiftKey) {
+            // Allow holding the shift key to call the original behavior.
             return;
         }
 
-        // Find the "Show in explorer" item and clone it as the basis for the
-        // "Set nickname" item.
-        const templateMenuItem = vaultSwitcherMenu.querySelector('.menu-item');
-        if (!templateMenuItem) {
-            console.error('No menu-item to clone');
-            return;
-        }
+        event.stopPropagation();
 
-        const openSettingsMenuItem = templateMenuItem.cloneNode(true);
-        if (!openSettingsMenuItem) {
-            console.error('Failed to clone menu-item');
-            return;
-        }
+        const menu = new Menu();
 
-        // Setup the "Set nickname" menu. 'mouseover' and 'mouseleave' must be
-        // manually implemented for feedback during mouse hover.
+        const showInFolderText =
+            Platform.isMacOS ?
+                window.OBSIDIAN_DEFAULT_I18N.plugins.openWithDefaultApp.actionShowInFolderMac :
+                window.OBSIDIAN_DEFAULT_I18N.plugins.openWithDefaultApp.actionShowInFolder;
 
-        const openSettingsMenuItemIcon =
-            openSettingsMenuItem.querySelector('.menu-item-icon');
+        menu.addItem((item) =>
+            item
+                .setTitle(`${showInFolderText}...`)
+                .setIcon('lucide-arrow-up-right')
+                .onClick(() =>
+                    this.app.showInFolder("")
+                )
+        );
 
-        if (openSettingsMenuItemIcon) {
-            // Hide the icon. (Not so simple to set a custom icon from here.)
-            openSettingsMenuItemIcon.toggleVisibility(false);
-        }
+        menu.addSeparator();
 
-        const openSettingsMenuItemLabel =
-            openSettingsMenuItem.querySelector('.menu-item-title');
+        menu.addItem((item) =>
+            item
+                .setTitle('Vault Nickname settings')
+                .setIcon('settings')
+                .onClick(() => this.openVaultNicknameSettings())
+        );
 
-        if (!openSettingsMenuItemLabel) {
-            console.error('No menu-item-title in cloned menu-item');
-            return;
-        }
-
-        openSettingsMenuItemLabel.textContent = 'Set nickname';
-
-        openSettingsMenuItem.addEventListener('click', this.openVaultNicknameSettings.bind(this));
-
-        /// Animate during mouseover.
-        ///
-        const onMouseOver = function () {
-            const parent = this.parentElement;
-
-            // Deselect other items. Otherwise, two items will be selected.
-            const menuItems = parent.querySelectorAll('.menu-item');
-            for (const menuItem of menuItems) {
-                menuItem.removeClass('selected');
-            }
-
-            this.addClass('selected');
-        }
-
-        /// Animate during mouseleave.
-        ///
-        const onMouseLeave = function () {
-            this.removeClass('selected');
-        }
-
-        openSettingsMenuItem.addEventListener('mouseover', onMouseOver.bind(openSettingsMenuItem));
-        openSettingsMenuItem.addEventListener('mouseleave', onMouseLeave.bind(openSettingsMenuItem));
-
-        vaultSwitcherMenu.appendChild(openSettingsMenuItem);
+        menu.showAtMouseEvent(event);
     }
 
     /// Invoked by the custom "Set nickname" menu item added to the vault
