@@ -14,7 +14,7 @@
 This plugin is intended to help disambiguate vaults that share the same folder name. This is common for users who adhere to a standard file structure between multiple projects. E.g., a "docs/" folder within each project.
 
 ## Supporters:
-* Big thank you to [@claremacrae](https://github.com/claremacrae) for her generous github sponsorship! ❤️
+* Big thank you to [@claremacrae](https://github.com/claremacrae) for her generous github sponsorship and bug reporting! ❤️
 * Thank you to [@t0b1hh](https://github.com/t0b1hh) for testing and reporting an issue affecting macOS.
 
 ## Install guide:
