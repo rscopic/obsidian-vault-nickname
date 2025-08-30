@@ -3,17 +3,17 @@
 <img src="https://media.githubusercontent.com/media/rscopic/obsidian-vault-nickname/master/docs/media/vault-nickname-feature.png" style="vertical-align: middle;"/>
 
 ## Features:
-* Customize a vault's display name without renaming its folder.
-* Choice to change the app's title to display vault names before the active document's name.
-  * E.g., "**\<Vault\>** - **\<Document\>**" rather than the default "**\<Document\>** - **\<Vault\>**"
-* A "Set nickname" shortcut found in the vault switcher's context menu provides quick access to the settings (PC-only).  
-   <img src="https://media.githubusercontent.com/media/rscopic/obsidian-vault-nickname/master/docs/media/vault-nickname-settings-quick-access.png" />
+* Set a custom vault display name without renaming its folder.
+* Choose the order of Obsidian's app title:
+    1. Vault name before the document; or,
+    2. Document name before the vault
+* A new context menu item on the vault switcher menu provides quick access to changing the vault's nickname.
+    <img src="https://media.githubusercontent.com/media/rscopic/obsidian-vault-nickname/master/docs/media/vault-nickname-settings-quick-access.png" />
 
 ## Motive:
-This plugin is intended to help disambiguate vaults that share the same folder name. This is common for users who adhere to a standard file structure between multiple projects. E.g., "docs/", "Obsidian/", etc.
+This plugin is intended to help disambiguate vaults that share the same folder name. This is common for users who adhere to a standard file structure between multiple projects. E.g., a "docs/" folder within each project.
 
 ## Supporters:
-
 Big thank you to [@claremacrae](https://github.com/claremacrae) for her generous github sponsorship! ❤️
 
 ## Install guide:
