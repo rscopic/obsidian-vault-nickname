@@ -250,23 +250,17 @@ export default class VaultNicknamePlugin extends Plugin {
                 VAULT_LOCAL_SHARED_SETTINGS_FILE_PATH
             ].join(PATH_SEPARATOR));
 
-            if (!this.filePathExistsSync(vaultPluginSettingsFilePath)) {
-                //console.log("No nickname settings for vault: " + vaultPluginSettingsFilePath);
-                continue;
-            }
+            if (this.filePathExistsSync(vaultPluginSettingsFilePath)) {
+                const vaultPluginSettingsJson =
+                    this.readUtf8FileSync(vaultPluginSettingsFilePath);
 
-            const vaultPluginSettingsJson =
-                this.readUtf8FileSync(vaultPluginSettingsFilePath);
+                if (vaultPluginSettingsJson) {
+                    const vaultPluginSettings = JSON.parse(vaultPluginSettingsJson);
 
-            if (!vaultPluginSettingsJson) {
-                //console.log("Could not read plugin settings: " + vaultPluginSettingsFilePath);
-                continue;
-            }
-
-            const vaultPluginSettings = JSON.parse(vaultPluginSettingsJson);
-
-            if (vaultPluginSettings && vaultPluginSettings.nickname && vaultPluginSettings.nickname.trim()) {
-                vaultName = vaultPluginSettings.nickname.trim();
+                    if (vaultPluginSettings && vaultPluginSettings.nickname && vaultPluginSettings.nickname.trim()) {
+                        vaultName = vaultPluginSettings.nickname.trim();
+                    }
+                }
             }
 
             menu.addItem((item) =>
