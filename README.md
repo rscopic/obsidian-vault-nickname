@@ -16,6 +16,7 @@ This plugin is intended to help disambiguate vaults that share the same folder n
 ## Supporters:
 * Big thank you to [@claremacrae](https://github.com/claremacrae) for her generous github sponsorship and bug reporting! ❤️
 * Thank you to [@t0b1hh](https://github.com/t0b1hh) for testing and reporting an issue affecting macOS.
+* Thank you to [@jakeanq](https://github.com/jakeanq) for testing and reporting an issue affecting Arch Linux.
 
 ## Install guide:
 1. Open Obsidian's **Settings**.

@@ -245,10 +245,18 @@ export default class VaultNicknamePlugin extends Plugin {
             // github.
             //const vaultConfigFolderName = App.getOverrideConfigDir(vaultKey);
 
-            const vaultPluginSettingsFilePath = normalizePath([
+            let vaultPluginSettingsFilePath = normalizePath([
                 vault.path,
                 VAULT_LOCAL_SHARED_SETTINGS_FILE_PATH
             ].join(PATH_SEPARATOR));
+
+            if (Platform.isLinux && !vaultPluginSettingsFilePath.startsWith(PATH_SEPARATOR)) {
+                // On Linux, the returned vault path is not prefixed with a
+                // root slash. This causes the upcoming call to fs.existsSync()
+                // to fail to open the settings file so we prepend the slash
+                // ourselves.
+                vaultPluginSettingsFilePath = PATH_SEPARATOR + vaultPluginSettingsFilePath;
+            }
 
             if (this.filePathExistsSync(vaultPluginSettingsFilePath)) {
                 const vaultPluginSettingsJson =
