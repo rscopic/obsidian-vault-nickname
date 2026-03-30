@@ -49,4 +49,4 @@ Choose how the nickname is applied to the app's title. The default value is "Fil
 
 ### Backwards compatibility
 
-When enabled, the plugin will save additional data to ensure backwards compatibility with other vaults using versions of this plugin earlier than 1.1.7.
+When enabled, the plugin will save additional data to ensure backwards compatibility with other vaults using versions of this plugin earlier than 1.1.9.
