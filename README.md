@@ -17,6 +17,7 @@ This plugin is intended to help disambiguate vaults that share the same folder n
 * Big thank you to [@claremacrae](https://github.com/claremacrae) for her generous github sponsorship and bug reporting! ❤️
 * Thank you to [@t0b1hh](https://github.com/t0b1hh) for testing and reporting an issue affecting macOS.
 * Thank you to [@jakeanq](https://github.com/jakeanq) for testing and reporting an issue affecting Arch Linux.
+* Thank you to [@rashad-malik](https://github.com/rashad-malik) for suggesting the nickname file be kept in the plugin's install directory.
 
 ## Install guide:
 1. Open Obsidian's **Settings**.
@@ -45,3 +46,7 @@ The name to display instead of the vault's folder name. When this is blank, the 
 ### Nickname in app title
 
 Choose how the nickname is applied to the app's title. The default value is "File name first" which is consistent with Obsidian's default behavior except the vault's nickname will be used.
+
+### Backwards compatibility
+
+When enabled, the plugin will save additional data to ensure backwards compatibility with other vaults using versions of this plugin earlier than 1.1.7.
