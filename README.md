@@ -18,6 +18,7 @@ This plugin is intended to help disambiguate vaults that share the same folder n
 * Thank you to [@t0b1hh](https://github.com/t0b1hh) for testing and reporting an issue affecting macOS.
 * Thank you to [@jakeanq](https://github.com/jakeanq) for testing and reporting an issue affecting Arch Linux.
 * Thank you to [@rashad-malik](https://github.com/rashad-malik) for suggesting the nickname file be kept in the plugin's install directory.
+* Thank you to [@dominique-unruh](https://github.com/dominique-unruh) for reporting a regression on Linux.
 
 ## Install guide:
 1. Open Obsidian's **Settings**.

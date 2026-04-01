@@ -80,6 +80,7 @@ export default class VaultNicknamePlugin extends Plugin {
     async onload() {
         this.isEnabled = true;
 
+
         // Create bound callbacks for access to `this` pointer.
         this.vaultItemRenamedCallback = this.onVaultItemRenamed.bind(this);
         this.activeLeafChangeCallback = this.onActiveLeafChange.bind(this);
@@ -280,15 +281,7 @@ export default class VaultNicknamePlugin extends Plugin {
         for (let vaultKey in vaults) {
             const vault = vaults[vaultKey];
 
-            let vaultPath = normalizePath(vault.path);
-
-            if (Platform.isLinux && !vaultPath.startsWith(PATH_SEPARATOR)) {
-                // On Linux, the returned vault path is not prefixed with a
-                // root slash. This causes the upcoming call to fs.existsSync()
-                // to fail to open the settings file so we prepend the slash
-                // ourselves.
-                vaultPath = PATH_SEPARATOR + vaultPath;
-            }
+            const vaultPath = this.prependPathSeparatorOnLinux(vault.path);
 
             let vaultName = vaultPath.substring(vaultPath.lastIndexOf('/') + 1);
 
@@ -312,7 +305,7 @@ export default class VaultNicknamePlugin extends Plugin {
                 pluginInstallDir = parts.join(PATH_SEPARATOR)
             }
 
-            let vaultPluginSettingsFilePath = normalizePath([
+            let vaultPluginSettingsFilePath = this.safeNormalizePath([
                 vaultPath,
                 pluginInstallDir,
                 VAULT_SHARED_SETTINGS_FILE_PATH
@@ -325,7 +318,7 @@ export default class VaultNicknamePlugin extends Plugin {
                 // The settings file does not exist in the plugin's install
                 // folder. Fallback to the legacy settings file (a hidden file
                 // in the vault's root).
-                vaultPluginSettingsFilePath = normalizePath([
+                vaultPluginSettingsFilePath = this.safeNormalizePath([
                     vaultPath,
                     VAULT_LOCAL_LEGACY_SHARED_SETTINGS_FILE_PATH
                 ].join(PATH_SEPARATOR));
@@ -639,7 +632,7 @@ export default class VaultNicknamePlugin extends Plugin {
     /// exists in the plugin's install folder.
     ///
     getSharedSettingsFilePath(): string {
-        return normalizePath([
+        return this.safeNormalizePath([
             this.app.vault.adapter.getBasePath(),
             this.manifest.dir,
             VAULT_SHARED_SETTINGS_FILE_PATH
@@ -652,10 +645,27 @@ export default class VaultNicknamePlugin extends Plugin {
     /// backwards compatibility reasons.
     ///
     getLegacySharedSettingsFilePath(): string {
-        return normalizePath([
+        return this.safeNormalizePath([
             this.app.vault.adapter.getBasePath(),
             VAULT_LOCAL_LEGACY_SHARED_SETTINGS_FILE_PATH
         ].join(PATH_SEPARATOR));
+    }
+
+    /// Ensure a path is that was prepended with a leading slash stays prepended
+    /// with a slash (only necessary on Linux). This is intended to resolve an
+    /// inconsistency with how paths are normalized between Mac and Linux.
+    ///
+    safeNormalizePath(path : string) : string {
+        const needsPathSeparatorPrepended =
+            path.startsWith(PATH_SEPARATOR);
+
+        path = normalizePath(path);
+
+        if (needsPathSeparatorPrepended) {
+            path = PATH_SEPARATOR + path;
+        }
+
+        return path;
     }
 
     // Using synchronous calls because they prevent momentary flicker when
