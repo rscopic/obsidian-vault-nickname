@@ -80,7 +80,6 @@ export default class VaultNicknamePlugin extends Plugin {
     async onload() {
         this.isEnabled = true;
 
-
         // Create bound callbacks for access to `this` pointer.
         this.vaultItemRenamedCallback = this.onVaultItemRenamed.bind(this);
         this.activeLeafChangeCallback = this.onActiveLeafChange.bind(this);
@@ -281,7 +280,7 @@ export default class VaultNicknamePlugin extends Plugin {
         for (let vaultKey in vaults) {
             const vault = vaults[vaultKey];
 
-            const vaultPath = this.prependPathSeparatorOnLinux(vault.path);
+            const vaultPath = this.safeNormalizePath(vault.path);
 
             let vaultName = vaultPath.substring(vaultPath.lastIndexOf('/') + 1);
 
