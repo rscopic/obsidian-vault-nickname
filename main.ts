@@ -273,7 +273,8 @@ export default class VaultNicknamePlugin extends Plugin {
         // TODO: This is at least one API that prevents support on mobile
         //       (thanks @joethei for identifying). Need to find a
         //       mobile - friendly alternative.
-        const vaults = electron.ipcRenderer.sendSync("vault-list");
+        // `electron` is not a global in the renderer; require it explicitly.
+        const vaults = require("electron").ipcRenderer.sendSync("vault-list");
 
         const menu = new Menu();
 
@@ -677,7 +678,12 @@ export default class VaultNicknamePlugin extends Plugin {
     }
 
     readUtf8FileSync(absoluteFilePath: string) : string {
-        return this.app.vault.adapter.fs.readFileSync(absoluteFilePath, 'utf8');
+        const content = this.app.vault.adapter.fs.readFileSync(absoluteFilePath, 'utf8');
+
+        // Strip a leading UTF-8 BOM (U+FEFF) if present. `JSON.parse` throws on
+        // a BOM, which otherwise breaks the vault switcher whenever any vault's
+        // settings file happens to be saved as UTF-8 with BOM.
+        return content.charCodeAt(0) === 0xFEFF ? content.slice(1) : content;
     }
 
     writeUtf8FileSync(absoluteFilePath: string, content: string) {
