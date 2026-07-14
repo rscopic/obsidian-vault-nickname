@@ -274,7 +274,8 @@ export default class VaultNicknamePlugin extends Plugin {
         //       (thanks @joethei for identifying). Need to find a
         //       mobile - friendly alternative.
         // `electron` is not a global in the renderer; require it explicitly.
-        const vaults = require("electron").ipcRenderer.sendSync("vault-list");
+        const ipcRenderer = require("electron").ipcRenderer;
+        const vaults = ipcRenderer.sendSync("vault-list");
 
         const menu = new Menu();
 
@@ -340,13 +341,35 @@ export default class VaultNicknamePlugin extends Plugin {
                 }
             }
 
+            const isActiveVault = vault.path === this.app.vault.adapter.basePath;
+
             menu.addItem((item) =>
                 item
                     .setTitle(vaultName)
-                    .setChecked(vault.path === this.app.vault.adapter.basePath)
-                    .onClick(() =>
-                        window.open(`obsidian://open?vault=${vaultKey}`)
-                    )
+                    .setChecked(isActiveVault)
+                    .onClick(() => {
+                        if (isActiveVault) {
+                            // Already viewing this vault; nothing to switch to.
+                            return;
+                        }
+
+                        // Open (or focus) the vault via Obsidian's internal
+                        // "vault-open" IPC channel; the same one the built-in
+                        // vault switcher uses. Passing `false` reuses the
+                        // existing window rather than opening a new one.
+                        //
+                        // The previous approach,
+                        // `window.open('obsidian://open?vault=...')`, silently
+                        // failed to switch when the target vault was already
+                        // open in another window, leaving the user stuck on the
+                        // current vault.
+                        const result =
+                            ipcRenderer.sendSync("vault-open", vault.path, false);
+
+                        if (result !== true) {
+                            console.error(`Failed to open vault '${vaultName}': ${result}`);
+                        }
+                    })
             );
         }
 
