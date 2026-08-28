@@ -12,12 +12,15 @@ import {
 
 type VaultNicknameStorageLocation =
     | 'plugin-directory'
+    | 'vault-config-directory'
     | 'vault-root';
 
 interface VaultNicknamePluginSettings {
     overrideAppTitle: string;
 
-    enableBackwardsCompatibilty: boolean;
+    /// The authoritative location of this vault's nickname file.
+    ///
+    nicknameStorageLocation: VaultNicknameStorageLocation;
 }
 
 interface VaultNicknameSharedPluginSettings {
@@ -28,8 +31,9 @@ interface VaultNicknameSharedPluginSettings {
 }
 
 interface VaultNicknameStoragePolicy {
+    writeLocation: VaultNicknameStorageLocation;
     readLocations: VaultNicknameStorageLocation[];
-    writeLocations: VaultNicknameStorageLocation[];
+    needsSettingsMigration: boolean;
 }
 
 interface LoadedVaultNicknameSettings {
@@ -39,11 +43,7 @@ interface LoadedVaultNicknameSettings {
 
 const DEFAULT_PLUGIN_SETTINGS: VaultNicknamePluginSettings = {
     overrideAppTitle: 'override-app-title:file-first',
-
-    /// Whether to save an additional .vault-nickname in the vault's root (for
-    /// backwards compatibility with plugins before 1.1.9).
-    ///
-    enableBackwardsCompatibilty: false,
+    nicknameStorageLocation: 'plugin-directory',
 };
 
 const DEFAULT_SHARED_SETTINGS: VaultNicknameSharedPluginSettings = {
@@ -67,6 +67,14 @@ const PLUGIN_DIRECTORY_NICKNAME_FILE_PATH = "data-shared.json";
 /// instances of the plugin running in other vaults.
 ///
 const VAULT_LOCAL_NICKNAME_FILE_PATH = ".vault-nickname";
+
+function isVaultNicknameStorageLocation(
+    value: unknown
+): value is VaultNicknameStorageLocation {
+    return value === 'plugin-directory' ||
+        value === 'vault-config-directory' ||
+        value === 'vault-root';
+}
 
 export default class VaultNicknamePlugin extends Plugin {
 
@@ -252,9 +260,8 @@ export default class VaultNicknamePlugin extends Plugin {
             const pluginSettings = this.readJsonFileIfExistsSync(
                 this.getPluginSettingsFilePath(vaultPath, pluginInstallDir)
             );
-            const storagePolicy = this.getCompatibilityStoragePolicy(
-                pluginSettings?.enableBackwardsCompatibilty === true
-            );
+            const storagePolicy =
+                this.getStoragePolicy(pluginSettings || {});
             const loadedNicknameSettings =
                 this.loadNicknameSettingsFromPaths(
                     this.getNicknameCandidatePaths(
@@ -471,39 +478,29 @@ export default class VaultNicknamePlugin extends Plugin {
         }
     }
 
-    /// Load the vault's nickname according to the current compatibility
-    /// policy. A root-only pre-1.1.9 file enables compatibility automatically
-    /// and is copied into the plugin directory without becoming secondary.
+    /// Load plugin settings first, resolve legacy settings into a storage
+    /// policy, then load the nickname from that policy's ordered candidates.
     ///
     async loadSettings() {
-        this.settings = Object.assign(
-            {},
-            DEFAULT_PLUGIN_SETTINGS,
-            await this.loadData()
-        );
+        const loadedPluginSettings = await this.loadData();
+        const rawPluginSettings =
+            loadedPluginSettings && typeof loadedPluginSettings === 'object' ?
+                loadedPluginSettings as Record<string, unknown> :
+                {};
+        const storagePolicy = this.getStoragePolicy(rawPluginSettings);
 
-        const pluginNicknameFilePath =
-            this.getNicknameSettingsFilePath('plugin-directory');
-        const rootNicknameFilePath =
-            this.getNicknameSettingsFilePath('vault-root');
-        const pluginNicknameExists =
-            this.filePathExistsSafelySync(pluginNicknameFilePath);
-        const rootNicknameExists =
-            this.filePathExistsSafelySync(rootNicknameFilePath);
-        const migratingRootOnlyNickname =
-            rootNicknameExists && !pluginNicknameExists;
+        this.settings = {
+            overrideAppTitle:
+                typeof rawPluginSettings.overrideAppTitle === 'string' ?
+                    rawPluginSettings.overrideAppTitle :
+                    DEFAULT_PLUGIN_SETTINGS.overrideAppTitle,
+            nicknameStorageLocation: storagePolicy.writeLocation,
+        };
 
-        if (migratingRootOnlyNickname) {
-            this.settings.enableBackwardsCompatibilty = true;
-        }
-
-        const storagePolicy = this.getCompatibilityStoragePolicy(
-            this.settings.enableBackwardsCompatibilty
-        );
+        const nicknameCandidatePaths =
+            this.getNicknameCandidatePaths(storagePolicy.readLocations);
         const loadedNicknameSettings =
-            this.loadNicknameSettingsFromPaths(
-                this.getNicknameCandidatePaths(storagePolicy.readLocations)
-            );
+            this.loadNicknameSettingsFromPaths(nicknameCandidatePaths);
 
         const loadedSharedSettings: VaultNicknameSharedPluginSettings =
             Object.assign({}, DEFAULT_SHARED_SETTINGS);
@@ -519,42 +516,42 @@ export default class VaultNicknamePlugin extends Plugin {
         }
         this.sharedSettings = loadedSharedSettings;
 
-        const nicknameFileMissing = storagePolicy.writeLocations.some(
-            location => !this.filePathExistsSafelySync(
-                this.getNicknameSettingsFilePath(location)
-            )
+        const targetNicknameFilePath = this.getNicknameSettingsFilePath(
+            storagePolicy.writeLocation
         );
+        const targetNicknameFileExists =
+            this.filePathExistsSafelySync(targetNicknameFilePath);
+        const anyCandidateFileExists = nicknameCandidatePaths.some(
+            candidatePath => this.filePathExistsSafelySync(candidatePath)
+        );
+        const needsNicknameMigration =
+            !targetNicknameFileExists ||
+            (loadedNicknameSettings !== null &&
+                loadedNicknameSettings.path !== targetNicknameFilePath);
 
-        if (nicknameFileMissing &&
-            (loadedNicknameSettings ||
-                (!pluginNicknameExists && !rootNicknameExists))) {
+        if (needsNicknameMigration &&
+            (loadedNicknameSettings || !anyCandidateFileExists)) {
             await this.saveSettings();
         }
-        else if (migratingRootOnlyNickname) {
-            // Preserve a malformed legacy file rather than replacing it with a
-            // default nickname merely to migrate the plugin setting.
+        else if (storagePolicy.needsSettingsMigration) {
+            // Do not overwrite an existing malformed nickname file merely to
+            // migrate data.json to the new selector schema.
             await this.saveData(this.settings);
         }
 
         this.refreshVaultDisplayName();
     }
 
-    /// Persist the nickname to every location required by the current
-    /// compatibility policy.
+    /// Write the nickname only to the selected authoritative location. Old
+    /// files are deliberately left untouched when the selector changes.
     ///
     async saveSettings() {
         const sharedSettingsJson = JSON.stringify(this.sharedSettings, null, 2);
-        const storagePolicy = this.getCompatibilityStoragePolicy(
-            this.settings.enableBackwardsCompatibilty
+        const sharedSettingsFilePath = this.getNicknameSettingsFilePath(
+            this.settings.nicknameStorageLocation
         );
 
-        for (const storageLocation of storagePolicy.writeLocations) {
-            this.writeUtf8FileSync(
-                this.getNicknameSettingsFilePath(storageLocation),
-                sharedSettingsJson
-            );
-        }
-
+        this.writeUtf8FileSync(sharedSettingsFilePath, sharedSettingsJson);
         await this.saveData(this.settings);
         this.refreshVaultDisplayName();
     }
@@ -649,23 +646,58 @@ export default class VaultNicknamePlugin extends Plugin {
             ].join(PATH_SEPARATOR));
         }
 
+        if (storageLocation === 'vault-config-directory') {
+            const configFolderName =
+                pluginInstallDir.split(PATH_SEPARATOR)[0] || '.obsidian';
+
+            return this.safeNormalizePath([
+                vaultPath,
+                configFolderName,
+                VAULT_LOCAL_NICKNAME_FILE_PATH
+            ].join(PATH_SEPARATOR));
+        }
+
         return this.safeNormalizePath([
             vaultPath,
             VAULT_LOCAL_NICKNAME_FILE_PATH
         ].join(PATH_SEPARATOR));
     }
 
-    getCompatibilityStoragePolicy(
-        backwardsCompatibilityEnabled: boolean
+    /// Convert either the new selector or the previous compatibility toggle
+    /// into one canonical write location and an ordered read set. Legacy
+    /// compatibility mode reads the root file first so a stale plugin copy can
+    /// no longer overwrite the value the toggle was meant to preserve.
+    ///
+    getStoragePolicy(
+        rawPluginSettings: Record<string, unknown>
     ): VaultNicknameStoragePolicy {
+        if (isVaultNicknameStorageLocation(
+            rawPluginSettings.nicknameStorageLocation
+        )) {
+            return {
+                writeLocation: rawPluginSettings.nicknameStorageLocation,
+                readLocations: [rawPluginSettings.nicknameStorageLocation],
+                needsSettingsMigration:
+                    Object.prototype.hasOwnProperty.call(
+                        rawPluginSettings,
+                        'enableBackwardsCompatibilty'
+                    ),
+            };
+        }
+
+        const backwardsCompatibilityEnabled =
+            rawPluginSettings.enableBackwardsCompatibilty === true;
+
         return backwardsCompatibilityEnabled ?
             {
+                writeLocation: 'vault-root',
                 readLocations: ['vault-root', 'plugin-directory'],
-                writeLocations: ['plugin-directory', 'vault-root'],
+                needsSettingsMigration: true,
             } :
             {
+                writeLocation: 'plugin-directory',
                 readLocations: ['plugin-directory', 'vault-root'],
-                writeLocations: ['plugin-directory'],
+                needsSettingsMigration: true,
             };
     }
 
@@ -796,9 +828,6 @@ export default class VaultNicknamePlugin extends Plugin {
         );
     }
 
-    deleteFileSync(absoluteFilePath: string) {
-        (this.app.vault.adapter as any).fs.unlinkSync(absoluteFilePath);
-    }
 }
 
 class VaultNicknameSettingTab extends PluginSettingTab {
@@ -877,37 +906,36 @@ class VaultNicknameSettingTab extends PluginSettingTab {
         }
 
         new Setting(containerEl)
-            .setName('Backwards compatibility')
-            .setDesc('Support other vaults that use a plugin version older than 1.1.9.')
+            .setName('Nickname storage')
+            .setDesc('Choose where each vault stores its authoritative nickname file.')
             .setTooltip(
-                'When enabled, a hidden .vault-nickname file is saved in the vault\'s root. This allows other vaults that are using a version earlier than 1.1.9 to properly display this vault\'s nickname.'
+                'The plugin folder is the existing default. Use the vault config folder when plugin directories are shared or symlinked between vaults. The vault-root option is compatible with plugin versions earlier than 1.1.9.'
             )
-            .addToggle(toggleComponent => {
-                toggleComponent.setValue(this.plugin.settings.enableBackwardsCompatibilty);
+            .addDropdown(dropdownComponent => {
+                dropdownComponent.addOption(
+                    'plugin-directory',
+                    'Plugin folder (default)'
+                );
+                dropdownComponent.addOption(
+                    'vault-config-directory',
+                    'Vault config folder'
+                );
+                dropdownComponent.addOption(
+                    'vault-root',
+                    'Vault root (legacy)'
+                );
 
-                toggleComponent.onChange(async newValue => {
-                    this.plugin.settings.enableBackwardsCompatibilty = newValue;
+                dropdownComponent.setValue(
+                    this.plugin.settings.nicknameStorageLocation
+                );
 
-                    await this.plugin.saveSettings();
-
-                    if (!newValue) {
-                        const legacySettingsFilePath =
-                            this.plugin.getNicknameSettingsFilePath('vault-root');
-
-                        try {
-                            // Automatically clean up the old settings file.
-                            // This will have already been migrated to the
-                            // plugin's install folder by this point.
-                            this.plugin.deleteFileSync(legacySettingsFilePath);
-                        }
-                        catch (err: any) {
-                            // Ignore errors about the file not existing.
-                            // Otherwise, rethrow.
-                            if (err.code !== 'ENOENT') {
-                                throw err;
-                            }
-                        }
+                dropdownComponent.onChange(async newValue => {
+                    if (!isVaultNicknameStorageLocation(newValue)) {
+                        return;
                     }
+
+                    this.plugin.settings.nicknameStorageLocation = newValue;
+                    await this.plugin.saveSettings();
                 });
             });
     }
