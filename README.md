@@ -4,6 +4,7 @@
 
 ## Features:
 * Set a custom vault display name without renaming its folder.
+* Choose where the nickname is stored: in the plugin folder, the vault's Obsidian config folder, or the vault root.
 * Choose the order of Obsidian's app title:
     1. Vault name before the document; or,
     2. Document name before the vault
@@ -12,6 +13,8 @@
 
 ## Motive:
 This plugin is intended to help disambiguate vaults that share the same folder name. This is common for users who adhere to a standard file structure between multiple projects. E.g., a "docs/" folder within each project.
+
+Configurable nickname storage also keeps vault identity separate from plugin installation state. This matters when plugin directories are shared or symlinked between vaults: the shared plugin settings can select the same storage policy everywhere, while each vault keeps its own nickname in its config folder.
 
 ## With thanks to:
 * **@claremacrae** for her generous github sponsorship and bug reporting! ❤️
@@ -39,7 +42,8 @@ This plugin is intended to help disambiguate vaults that share the same folder n
 > This is required because plugins can only affect the user interface of vaults where they're installed. If a vault doesn't need a nickname itself, but needs to see other vaults' nicknames, you may still install the plugin and simply clear the nickname field for the already-correct vault.
 
 ## Plugin settings:
-<img src="https://media.githubusercontent.com/media/rscopic/obsidian-vault-nickname/master/docs/media/vault-nickname-settings.png" />
+
+![Vault Nickname settings](docs/media/vault-nickname-settings.svg)
 
 ### Vault nickname
 
@@ -49,6 +53,12 @@ The name to display instead of the vault's folder name. When this is blank, the 
 
 Choose how the nickname is applied to the app's title. The default value is "File name first" which is consistent with Obsidian's default behavior except the vault's nickname will be used.
 
-### Backwards compatibility
+### Nickname storage
 
-When enabled, the plugin will save additional data to ensure backwards compatibility with other vaults using versions of this plugin earlier than 1.1.9.
+Choose the authoritative file from which this vault's nickname is read and to which future changes are written:
+
+* **Plugin folder (default)** — `<vault>/<config>/plugins/vault-nickname/data-shared.json`. This preserves the behavior of versions 1.1.9 and newer.
+* **Vault config folder** — `<vault>/<config>/.vault-nickname`, normally `<vault>/.obsidian/.vault-nickname`. Use this when plugin directories are shared or symlinked: the selector in `data.json` may be shared, while the nickname remains local to each vault.
+* **Vault root (legacy)** — `<vault>/.vault-nickname`. This location can also be read by plugin versions earlier than 1.1.9.
+
+When upgrading from the previous toggle, disabled backwards compatibility maps to **Plugin folder**. Enabled backwards compatibility maps to **Vault root**, and the root file is read before the plugin copy so its value remains authoritative. A root-only nickname from a pre-1.1.9 installation is imported into the plugin-folder location. Changing the selected location writes the current nickname there and deliberately leaves the previous file untouched.
