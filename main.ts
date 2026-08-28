@@ -38,6 +38,10 @@ const DEFAULT_SHARED_SETTINGS: VaultNicknameSharedPluginSettings = {
 
 const PATH_SEPARATOR: string = Platform.isWin ? '\\' : '/';
 
+/// The standard plugin settings file created by Plugin.saveData().
+///
+const PLUGIN_SETTINGS_FILE_PATH = "data.json";
+
 /// The path to the shared settings file (relative to the plugin's config
 /// folder). This supersedes the hidden file that was previously stored in the
 /// vault's root that performed the same function.
@@ -305,32 +309,40 @@ export default class VaultNicknamePlugin extends Plugin {
                 pluginInstallDir = parts.join(PATH_SEPARATOR)
             }
 
-            let vaultPluginSettingsFilePath = this.safeNormalizePath([
+            const pluginSettingsFilePath = this.safeNormalizePath([
+                vaultPath,
+                pluginInstallDir,
+                PLUGIN_SETTINGS_FILE_PATH
+            ].join(PATH_SEPARATOR));
+            const pluginSettings =
+                this.readJsonFileIfExistsSync(pluginSettingsFilePath);
+            const backwardsCompatibilityEnabled =
+                pluginSettings?.enableBackwardsCompatibilty === true;
+
+            const pluginNicknameFilePath = this.safeNormalizePath([
                 vaultPath,
                 pluginInstallDir,
                 VAULT_SHARED_SETTINGS_FILE_PATH
             ].join(PATH_SEPARATOR));
+            const legacyNicknameFilePath = this.safeNormalizePath([
+                vaultPath,
+                VAULT_LOCAL_LEGACY_SHARED_SETTINGS_FILE_PATH
+            ].join(PATH_SEPARATOR));
 
-            let vaultPluginSettings =
-                this.readJsonFileIfExistsSync(vaultPluginSettingsFilePath);
+            const nicknameCandidatePaths = backwardsCompatibilityEnabled ?
+                [legacyNicknameFilePath, pluginNicknameFilePath] :
+                [pluginNicknameFilePath, legacyNicknameFilePath];
 
-            if (!vaultPluginSettings) {
-                // The settings file does not exist or cannot be read in the
-                // plugin's install folder. Fall back to the legacy hidden file
-                // in the vault's root.
-                vaultPluginSettingsFilePath = this.safeNormalizePath([
-                    vaultPath,
-                    VAULT_LOCAL_LEGACY_SHARED_SETTINGS_FILE_PATH
-                ].join(PATH_SEPARATOR));
+            for (const nicknameCandidatePath of nicknameCandidatePaths) {
+                const vaultPluginSettings =
+                    this.readJsonFileIfExistsSync(nicknameCandidatePath);
 
-                vaultPluginSettings =
-                    this.readJsonFileIfExistsSync(vaultPluginSettingsFilePath);
-            }
-
-            if (vaultPluginSettings &&
-                typeof vaultPluginSettings.nickname === 'string' &&
-                vaultPluginSettings.nickname.trim()) {
-                vaultName = vaultPluginSettings.nickname.trim();
+                if (vaultPluginSettings &&
+                    typeof vaultPluginSettings.nickname === 'string' &&
+                    vaultPluginSettings.nickname.trim()) {
+                    vaultName = vaultPluginSettings.nickname.trim();
+                    break;
+                }
             }
 
             menu.addItem((item) =>
@@ -539,6 +551,14 @@ export default class VaultNicknamePlugin extends Plugin {
     /// is used. If no settings file exists, default values will be applied.
     ///
     async loadSettings() {
+        // Load plugin settings first because compatibility mode controls which
+        // nickname file is authoritative.
+        this.settings = Object.assign(
+            {},
+            DEFAULT_PLUGIN_SETTINGS,
+            await this.loadData()
+        );
+
         // Default the nickname to the parent folder's name.
         const loadedSharedSettings: VaultNicknameSharedPluginSettings =
             Object.assign({}, DEFAULT_SHARED_SETTINGS);
@@ -548,21 +568,25 @@ export default class VaultNicknamePlugin extends Plugin {
             loadedSharedSettings.nickname = parentFolderName;
         }
 
-        // Overwrite default nickname with previously saved value.
         const sharedSettingsFilePath = this.getSharedSettingsFilePath();
-        const storedSharedSettings =
-            this.readJsonFileIfExistsSync(sharedSettingsFilePath);
+        const legacySettingsFilePath = this.getLegacySharedSettingsFilePath();
+        const nicknameCandidatePaths =
+            this.settings.enableBackwardsCompatibilty ?
+                [legacySettingsFilePath, sharedSettingsFilePath] :
+                [sharedSettingsFilePath, legacySettingsFilePath];
 
-        if (storedSharedSettings &&
-            typeof storedSharedSettings.nickname === 'string') {
-            loadedSharedSettings.nickname = storedSharedSettings.nickname;
+        for (const nicknameCandidatePath of nicknameCandidatePaths) {
+            const storedSharedSettings =
+                this.readJsonFileIfExistsSync(nicknameCandidatePath);
+
+            if (storedSharedSettings &&
+                typeof storedSharedSettings.nickname === 'string') {
+                loadedSharedSettings.nickname = storedSharedSettings.nickname;
+                break;
+            }
         }
 
-        // Apply the loaded nickname settings.
         this.sharedSettings = loadedSharedSettings;
-
-        this.settings = Object.assign({}, DEFAULT_PLUGIN_SETTINGS, await this.loadData());
-
         this.refreshVaultDisplayName();
     }
 
