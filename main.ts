@@ -311,33 +311,26 @@ export default class VaultNicknamePlugin extends Plugin {
                 VAULT_SHARED_SETTINGS_FILE_PATH
             ].join(PATH_SEPARATOR));
 
-            let settingsFileExists =
-                this.filePathExistsSync(vaultPluginSettingsFilePath);
+            let vaultPluginSettings =
+                this.readJsonFileIfExistsSync(vaultPluginSettingsFilePath);
 
-            if (!settingsFileExists) {
-                // The settings file does not exist in the plugin's install
-                // folder. Fallback to the legacy settings file (a hidden file
-                // in the vault's root).
+            if (!vaultPluginSettings) {
+                // The settings file does not exist or cannot be read in the
+                // plugin's install folder. Fall back to the legacy hidden file
+                // in the vault's root.
                 vaultPluginSettingsFilePath = this.safeNormalizePath([
                     vaultPath,
                     VAULT_LOCAL_LEGACY_SHARED_SETTINGS_FILE_PATH
                 ].join(PATH_SEPARATOR));
 
-                settingsFileExists =
-                    this.filePathExistsSync(vaultPluginSettingsFilePath);
+                vaultPluginSettings =
+                    this.readJsonFileIfExistsSync(vaultPluginSettingsFilePath);
             }
 
-            if (settingsFileExists) {
-                const vaultPluginSettingsJson =
-                    this.readUtf8FileSync(vaultPluginSettingsFilePath);
-
-                if (vaultPluginSettingsJson) {
-                    const vaultPluginSettings = JSON.parse(vaultPluginSettingsJson);
-
-                    if (vaultPluginSettings && vaultPluginSettings.nickname && vaultPluginSettings.nickname.trim()) {
-                        vaultName = vaultPluginSettings.nickname.trim();
-                    }
-                }
+            if (vaultPluginSettings &&
+                typeof vaultPluginSettings.nickname === 'string' &&
+                vaultPluginSettings.nickname.trim()) {
+                vaultName = vaultPluginSettings.nickname.trim();
             }
 
             menu.addItem((item) =>
@@ -557,12 +550,12 @@ export default class VaultNicknamePlugin extends Plugin {
 
         // Overwrite default nickname with previously saved value.
         const sharedSettingsFilePath = this.getSharedSettingsFilePath();
+        const storedSharedSettings =
+            this.readJsonFileIfExistsSync(sharedSettingsFilePath);
 
-        if (this.filePathExistsSync(sharedSettingsFilePath)) {
-            const settingsJson = this.readUtf8FileSync(sharedSettingsFilePath);
-
-            loadedSharedSettings
-                Object.assign(loadedSharedSettings, JSON.parse(settingsJson));
+        if (storedSharedSettings &&
+            typeof storedSharedSettings.nickname === 'string') {
+            loadedSharedSettings.nickname = storedSharedSettings.nickname;
         }
 
         // Apply the loaded nickname settings.
@@ -649,6 +642,54 @@ export default class VaultNicknamePlugin extends Plugin {
             this.app.vault.adapter.getBasePath(),
             VAULT_LOCAL_LEGACY_SHARED_SETTINGS_FILE_PATH
         ].join(PATH_SEPARATOR));
+    }
+
+    /// Read a JSON object without letting one missing or malformed vault file
+    /// prevent the switcher from opening.
+    ///
+    readJsonFileIfExistsSync(
+        absoluteFilePath: string
+    ): Record<string, unknown> | null {
+        if (!this.filePathExistsSafelySync(absoluteFilePath)) {
+            return null;
+        }
+
+        try {
+            const settingsJson = this.readUtf8FileSync(absoluteFilePath);
+            const parsedSettings: unknown = JSON.parse(settingsJson);
+
+            if (!parsedSettings || typeof parsedSettings !== 'object' ||
+                Array.isArray(parsedSettings)) {
+                console.error(
+                    "Settings file does not contain a JSON object: " +
+                    absoluteFilePath
+                );
+                return null;
+            }
+
+            return parsedSettings as Record<string, unknown>;
+        }
+        catch (error) {
+            console.error(
+                "Could not read settings file: " + absoluteFilePath,
+                error
+            );
+            return null;
+        }
+    }
+
+    filePathExistsSafelySync(absoluteFilePath: string): boolean {
+        try {
+            return this.filePathExistsSync(absoluteFilePath);
+        }
+        catch (error) {
+            console.error(
+                "Could not determine if settings file exists: " +
+                absoluteFilePath,
+                error
+            );
+            return false;
+        }
     }
 
     /// Ensure a path is that was prepended with a leading slash stays prepended
